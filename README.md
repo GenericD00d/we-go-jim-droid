@@ -49,8 +49,13 @@ your own.
 
 Requires Android 8.0 (API 26) or newer.
 
-Build the APK yourself (below), then sideload `app/build/outputs/apk/release/app-release.apk`. Release
-builds are signed with your local debug key, so later builds from the same machine install as updates.
+1. Download the latest APK from the [Releases page](https://github.com/GenericD00d/we-go-jim-droid/releases/latest).
+2. Open it on your phone. Android will ask you to allow installs from your browser or file manager.
+3. Tap **Install**.
+
+Releases are signed with a development key and meant for sideloading. An APK you build yourself is
+signed with your own debug key and can't install over a release (or the reverse) without an uninstall
+first. Save a backup file from **Settings → Save backup file** before switching.
 
 ## Build
 
