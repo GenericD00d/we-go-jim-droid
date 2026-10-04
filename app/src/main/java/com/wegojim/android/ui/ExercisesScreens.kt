@@ -30,7 +30,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.MenuAnchorType
+import androidx.compose.material3.ExposedDropdownMenuAnchorType
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -72,7 +72,9 @@ fun ExercisesScreen(nav: NavHostController) {
     var query by rememberSaveable { mutableStateOf("") }
     var category by rememberSaveable { mutableStateOf<String?>(null) }
     var creating by remember { mutableStateOf(false) }
-    val filtered = remember(all, query, category) { all.filterCatalog(query, category) }
+    var muscle by rememberSaveable { mutableStateOf<String?>(null) }
+    val muscles = remember(all) { all.primaryMuscleOptions() }
+    val filtered = remember(all, query, category, muscle) { all.filterCatalog(query, category, muscle) }
 
     Scaffold(
         topBar = { TopAppBar(title = { Text("Exercises", fontWeight = FontWeight.Bold) }) },
@@ -81,7 +83,7 @@ fun ExercisesScreen(nav: NavHostController) {
         },
     ) { padding ->
         LazyColumn(contentPadding = PaddingValues(top = padding.calculateTopPadding(), bottom = 88.dp)) {
-            item { CatalogFilters(query, { query = it }, categories, category, { category = it }) }
+            item { CatalogFilters(query, { query = it }, categories, category, { category = it }, muscles, muscle, { muscle = it }) }
             if (filtered.isEmpty() && GymEasterEgg.searchMatches(query)) {
                 item { Text(GymEasterEgg.SEARCH_MESSAGE, Modifier.padding(16.dp), color = Wgj.colors.gold, fontWeight = FontWeight.Bold) }
             }
@@ -152,7 +154,7 @@ fun Dropdown(label: String, value: String, options: List<String>, onSelect: (Str
             readOnly = true,
             label = { Text(label) },
             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
-            modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable),
+            modifier = Modifier.menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable),
         )
         ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             options.forEach { option ->
@@ -207,6 +209,10 @@ fun ExerciseDetailScreen(nav: NavHostController, uuid: String) {
                         if (e.primaryList.isNotEmpty()) LabeledValue("Primary", e.primaryList.joinToString())
                         if (e.secondaryList.isNotEmpty()) LabeledValue("Secondary", e.secondaryList.joinToString())
                         if (e.instructions.isNotBlank()) Text(e.instructions)
+                        if (e.primaryList.isNotEmpty() || e.secondaryList.isNotEmpty()) {
+                            Text("Muscle map", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                            ExerciseBodyMap(e.primaryList, e.secondaryList)
+                        }
                     }
                 }
             }

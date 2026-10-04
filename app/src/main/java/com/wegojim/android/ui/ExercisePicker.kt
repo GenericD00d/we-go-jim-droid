@@ -5,11 +5,13 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Accessibility
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Checkbox
@@ -45,10 +47,11 @@ fun ExerciseEntity.catalogSubtitle(): String =
     (listOf(category) + primaryList.filter { it != category }.joinToString(", ")).filter { it.isNotBlank() }.joinToString(" · ")
 
 /** Search filter shared by the picker and the catalog tab. */
-fun List<ExerciseEntity>.filterCatalog(query: String, category: String?): List<ExerciseEntity> {
+fun List<ExerciseEntity>.filterCatalog(query: String, category: String?, muscle: String? = null): List<ExerciseEntity> {
     val q = query.trim()
     return filter { e ->
         (category == null || e.category == category) &&
+            (muscle == null || muscle in e.primaryList) &&
             (q.isEmpty() || e.name.contains(q, ignoreCase = true) || e.aliases.contains(q, ignoreCase = true) ||
                 e.primaryMuscles.contains(q, ignoreCase = true) || e.equipment.contains(q, ignoreCase = true))
     }
@@ -61,7 +64,11 @@ fun CatalogFilters(
     categories: List<String>,
     category: String?,
     onCategoryChange: (String?) -> Unit,
+    muscles: List<String> = emptyList(),
+    muscle: String? = null,
+    onMuscleChange: (String?) -> Unit = {},
 ) {
+    var pickingMuscle by remember { mutableStateOf(false) }
     OutlinedTextField(
         value = query,
         onValueChange = onQueryChange,
@@ -73,14 +80,30 @@ fun CatalogFilters(
         shape = MaterialTheme.shapes.medium,
     )
     LazyRow(contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (muscles.isNotEmpty()) {
+            item {
+                FilterChip(
+                    selected = muscle != null,
+                    onClick = { pickingMuscle = true },
+                    label = { Text(muscle ?: "Body part") },
+                    leadingIcon = { Icon(Icons.Default.Accessibility, null, Modifier.size(18.dp)) },
+                )
+            }
+        }
         item { FilterChip(selected = category == null, onClick = { onCategoryChange(null) }, label = { Text("All") }) }
         items(categories) { c ->
             FilterChip(selected = category == c, onClick = { onCategoryChange(if (category == c) null else c) }, label = { Text(c) })
         }
     }
+    if (pickingMuscle) {
+        BodyPartFilterDialog(muscles, muscle, onSelect = onMuscleChange, onDismiss = { pickingMuscle = false })
+    }
 }
 
 enum class PickerMode { Strength, Cardio }
+
+/** Distinct primary muscles in a catalog, for the body part filter. */
+fun List<ExerciseEntity>.primaryMuscleOptions(): List<String> = flatMap { it.primaryList }.distinct().sorted()
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -98,7 +121,9 @@ fun ExercisePickerDialog(
     var query by rememberSaveable { mutableStateOf("") }
     var category by rememberSaveable { mutableStateOf<String?>(null) }
     val selected = remember { mutableStateListOf<String>() }
-    val filtered = remember(pool, query, category) { pool.filterCatalog(query, category) }
+    var muscle by rememberSaveable { mutableStateOf<String?>(null) }
+    val muscles = remember(pool) { pool.primaryMuscleOptions() }
+    val filtered = remember(pool, query, category, muscle) { pool.filterCatalog(query, category, muscle) }
 
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         Scaffold(
@@ -116,7 +141,7 @@ fun ExercisePickerDialog(
             },
         ) { padding ->
             LazyColumn(contentPadding = padding) {
-                item { CatalogFilters(query, { query = it }, categories, category, { category = it }) }
+                item { CatalogFilters(query, { query = it }, categories, category, { category = it }, muscles, muscle, { muscle = it }) }
                 items(filtered, key = { it.uuid }) { exercise ->
                     val checked = exercise.uuid in selected
                     val toggle = {

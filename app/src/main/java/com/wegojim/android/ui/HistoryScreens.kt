@@ -262,7 +262,7 @@ fun WorkoutDetailScreen(nav: NavHostController, workoutId: String, isSummary: Bo
                         if (kcal != null) Text("≈ $kcal active kcal (estimate)", fontWeight = FontWeight.SemiBold)
                         if (heat.isNotEmpty()) {
                             Text("Muscles worked", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            MuscleHeatmapGrid(heat)
+                            BodyHeatmap(heat)
                         }
                     }
                 }

@@ -104,44 +104,6 @@ fun LineChart(points: List<TrendPoint>, format: (Double) -> String, modifier: Mo
     }
 }
 
-/** Muscle groups as tiles shaded by relative training load. */
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-fun MuscleHeatmapGrid(scores: List<Pair<String, Double>>) {
-    if (scores.isEmpty()) {
-        Text("No working sets in this period yet.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-        return
-    }
-    val byMuscle = scores.toMap()
-    val hot = MaterialTheme.colorScheme.primary
-    val cold = MaterialTheme.colorScheme.surfaceContainerHighest
-    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        MuscleHeatmap.muscles.forEach { muscle ->
-            val intensity = byMuscle[muscle] ?: 0.0
-            val bg = lerp(cold, hot, intensity.toFloat())
-            Box(
-                Modifier
-                    .background(bg, RoundedCornerShape(10.dp))
-                    .padding(horizontal = 10.dp, vertical = 6.dp),
-            ) {
-                Text(
-                    muscle,
-                    style = MaterialTheme.typography.labelMedium,
-                    color = if (intensity > 0.55) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
-                    fontWeight = if (intensity > 0) FontWeight.SemiBold else FontWeight.Normal,
-                )
-            }
-        }
-    }
-}
-
-private fun lerp(a: Color, b: Color, t: Float) = Color(
-    red = a.red + (b.red - a.red) * t,
-    green = a.green + (b.green - a.green) * t,
-    blue = a.blue + (b.blue - a.blue) * t,
-    alpha = 1f,
-)
-
 /** GitHub-style grid of the last [weeks] weeks; columns are weeks, rows weekdays. */
 @Composable
 fun ConsistencyCalendar(days: Map<LocalDate, Int>, weekStart: (LocalDate) -> LocalDate, weeks: Int = 16) {

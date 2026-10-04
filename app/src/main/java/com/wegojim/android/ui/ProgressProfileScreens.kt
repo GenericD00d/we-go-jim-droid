@@ -335,7 +335,7 @@ private fun DashboardCard(
         }
         WidgetKind.muscleHeatmap -> SectionCard {
             Text("This week's muscles", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-            MuscleHeatmapGrid(remember(thisWeek, catalog) { MuscleHeatmap.build(thisWeek, catalog) })
+            BodyHeatmap(remember(thisWeek, catalog) { MuscleHeatmap.build(thisWeek, catalog) })
         }
         WidgetKind.consistencyCalendar -> SectionCard {
             Text("Consistency · last 16 weeks", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)

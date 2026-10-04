@@ -227,6 +227,7 @@ fun SettingsScreen(nav: NavHostController) {
                     Text("We Go Jim for Android", fontWeight = FontWeight.SemiBold)
                     Text(
                         "An Android port of We Go Jim by Andreas Hortlund (github.com/Hortlund/we-go-jim), MIT License. " +
+                            "Muscle map artwork from MuscleMap by Melih Colpan (github.com/melihcolpan/MuscleMap), MIT License. " +
                             "Your data stays on this device and is included in Android's device backup.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,

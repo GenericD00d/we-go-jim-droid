@@ -30,6 +30,10 @@ Requires JDK 17 and the Android SDK (compileSdk 36).
 - **Progress**: workout-vs-workout comparison and per-exercise trends (1RM, max weight, volume, reps).
 - **Profile**: configurable dashboard (weekly goal, coach brief, streaks, PRs, muscle heatmap,
   consistency, top exercises, exercise trends, calories), avatar, athlete types, six themes.
+- **Muscle map**: front/back body on exercise detail, tap-to-filter by body part in the catalog and
+  picker, and body heatmaps for the week and each workout. Artwork is generated from
+  [MuscleMap](https://github.com/melihcolpan/MuscleMap) (MIT, `licenses/MuscleMap-LICENSE`) by
+  `scripts/gen_body_paths.py`.
 - **Data**: Room database on device, Android Auto Backup, manual backup/restore file, optional
   Health Connect export, weekly-goal home screen widget.
 
@@ -40,7 +44,6 @@ Requires JDK 17 and the Android SDK (compileSdk 36).
 | CloudKit private backup | Android Auto Backup + backup file export/restore |
 | Apple Health export | Health Connect export (opt-in) |
 | On-device Foundation Models coach copy | The iOS deterministic coach recap (same rules) |
-| Interactive SVG body map (MuscleMap package) | Muscle-group heatmap tiles (same scoring) |
 | Exercise images fetched from an online catalog | Not included; the bundled catalog has no images |
 
 ## Architecture
