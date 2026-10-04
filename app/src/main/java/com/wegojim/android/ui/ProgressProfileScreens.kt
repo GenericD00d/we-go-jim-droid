@@ -33,6 +33,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import com.wegojim.android.app
+import com.wegojim.android.data.DistanceUnit
 import com.wegojim.android.data.LoadUnit
 import com.wegojim.android.data.WorkoutEntity
 import java.time.LocalDate
@@ -171,6 +172,10 @@ fun ProfileScreen() {
                                 shape = SegmentedButtonDefaults.itemShape(i, 2),
                             ) { Text(unit.label) }
                         }
+                    }
+                    Text("Distance unit", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Segmented(listOf(DistanceUnit.kilometers, DistanceUnit.miles), settings.distanceUnit, { it.symbol }) { unit ->
+                        app.settings.update { it.copy(distanceUnit = unit) }
                     }
                     Stepper(
                         "Weekly goal",

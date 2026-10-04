@@ -1,6 +1,7 @@
 package com.wegojim.android.data
 
 import android.content.Context
+import androidx.room.ColumnInfo
 import androidx.room.Dao
 import androidx.room.Database
 import androidx.room.Entity
@@ -12,6 +13,8 @@ import androidx.room.RoomDatabase
 import androidx.room.TypeConverter
 import androidx.room.TypeConverters
 import androidx.room.Upsert
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import kotlinx.coroutines.flow.Flow
 import kotlinx.serialization.builtins.ListSerializer
 
@@ -45,6 +48,14 @@ data class TemplateEntity(
     val sortOrder: Int = 0,
     val exercises: List<ExerciseEntry> = emptyList(),
     val updatedAt: Long = System.currentTimeMillis(),
+    @ColumnInfo(defaultValue = "[]") val cardio: List<CardioBlock> = emptyList(),
+)
+
+@Entity(tableName = "template_folders")
+data class TemplateFolderEntity(
+    @PrimaryKey val id: String = newId(),
+    val name: String,
+    val sortOrder: Int = 0,
 )
 
 @Entity(tableName = "workouts", indices = [Index("startedAt")])
@@ -59,7 +70,9 @@ data class WorkoutEntity(
     val prCount: Int,
     val notes: String,
     val exercises: List<ExerciseEntry>,
+    @ColumnInfo(defaultValue = "[]") val cardio: List<CardioBlock> = emptyList(),
 ) {
+    val cardioSeconds: Int get() = cardio.filter { it.completed }.sumOf { it.durationSeconds ?: 0 }
     val completedSetCount: Int get() = exercises.sumOf { e -> e.sets.count { it.completed } }
 }
 
@@ -93,6 +106,7 @@ data class ExerciseBest(
 
 // Top-level so Room's KSP pass doesn't need to resolve the plugin-generated serializer type.
 private val exerciseListSerializer by lazy { ListSerializer(ExerciseEntry.serializer()) }
+private val cardioListSerializer by lazy { ListSerializer(CardioBlock.serializer()) }
 
 class Converters {
     @TypeConverter
@@ -100,6 +114,12 @@ class Converters {
 
     @TypeConverter
     fun toExercises(value: String): List<ExerciseEntry> = AppJson.decodeFromString(exerciseListSerializer, value)
+
+    @TypeConverter
+    fun fromCardio(value: List<CardioBlock>): String = AppJson.encodeToString(cardioListSerializer, value)
+
+    @TypeConverter
+    fun toCardio(value: String): List<CardioBlock> = AppJson.decodeFromString(cardioListSerializer, value)
 
     @TypeConverter
     fun fromUnit(value: LoadUnit): String = value.name
@@ -142,6 +162,21 @@ interface TemplateDao {
 
     @Query("SELECT COALESCE(MAX(sortOrder), 0) FROM templates")
     suspend fun maxSortOrder(): Int
+
+    @Query("SELECT * FROM template_folders ORDER BY sortOrder, name COLLATE NOCASE")
+    fun folders(): Flow<List<TemplateFolderEntity>>
+
+    @Upsert
+    suspend fun upsertFolder(folder: TemplateFolderEntity)
+
+    @Query("DELETE FROM template_folders WHERE id = :id")
+    suspend fun deleteFolder(id: String)
+
+    @Query("UPDATE templates SET folderId = NULL WHERE folderId = :folderId")
+    suspend fun clearFolder(folderId: String)
+
+    @Query("SELECT COALESCE(MAX(sortOrder), 0) FROM template_folders")
+    suspend fun maxFolderSortOrder(): Int
 }
 
 @Dao
@@ -175,6 +210,9 @@ interface WorkoutDao {
     )
     suspend fun lastSessionSets(exerciseUuid: String): List<SetFactEntity>
 
+    @Query("SELECT MAX(completedAt) FROM set_facts WHERE exerciseUuid = :exerciseUuid")
+    suspend fun lastCompletedAt(exerciseUuid: String): Long?
+
     @Query("SELECT * FROM set_facts WHERE exerciseUuid = :exerciseUuid ORDER BY completedAt DESC, setIndex")
     fun factsForExercise(exerciseUuid: String): Flow<List<SetFactEntity>>
 
@@ -191,8 +229,8 @@ interface WorkoutDao {
 }
 
 @Database(
-    entities = [ExerciseEntity::class, TemplateEntity::class, WorkoutEntity::class, SetFactEntity::class],
-    version = 1,
+    entities = [ExerciseEntity::class, TemplateEntity::class, TemplateFolderEntity::class, WorkoutEntity::class, SetFactEntity::class],
+    version = 2,
 )
 @TypeConverters(Converters::class)
 abstract class AppDatabase : RoomDatabase() {
@@ -202,6 +240,16 @@ abstract class AppDatabase : RoomDatabase() {
 
     companion object {
         fun create(context: Context): AppDatabase =
-            Room.databaseBuilder(context, AppDatabase::class.java, "wgj.db").build()
+            Room.databaseBuilder(context, AppDatabase::class.java, "wgj.db")
+                .addMigrations(MIGRATION_1_2)
+                .build()
+
+        private val MIGRATION_1_2 = object : Migration(1, 2) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE templates ADD COLUMN cardio TEXT NOT NULL DEFAULT '[]'")
+                db.execSQL("ALTER TABLE workouts ADD COLUMN cardio TEXT NOT NULL DEFAULT '[]'")
+                db.execSQL("CREATE TABLE IF NOT EXISTS template_folders (id TEXT NOT NULL, name TEXT NOT NULL, sortOrder INTEGER NOT NULL, PRIMARY KEY(id))")
+            }
+        }
     }
 }

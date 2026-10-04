@@ -80,16 +80,20 @@ fun CatalogFilters(
     }
 }
 
+enum class PickerMode { Strength, Cardio }
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ExercisePickerDialog(
     onDismiss: () -> Unit,
     onConfirm: (List<ExerciseEntity>) -> Unit,
-    includeCardio: Boolean = false,
+    mode: PickerMode = PickerMode.Strength,
+    single: Boolean = false,
+    title: String = if (mode == PickerMode.Cardio) "Add Cardio" else "Add Exercises",
 ) {
     val repo = LocalContext.current.app.repository
     val all by repo.exercises.collectAsStateWithLifecycle(emptyList())
-    val pool = remember(all, includeCardio) { if (includeCardio) all else all.filter { !it.isCardio } }
+    val pool = remember(all, mode) { all.filter { it.isCardio == (mode == PickerMode.Cardio) } }
     val categories = remember(pool) { pool.map { it.category }.distinct().sorted() }
     var query by rememberSaveable { mutableStateOf("") }
     var category by rememberSaveable { mutableStateOf<String?>(null) }
@@ -100,10 +104,10 @@ fun ExercisePickerDialog(
         Scaffold(
             topBar = {
                 TopAppBar(
-                    title = { Text("Add Exercises") },
+                    title = { Text(title) },
                     navigationIcon = { IconButton(onClick = onDismiss) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Close") } },
                     actions = {
-                        TextButton(enabled = selected.isNotEmpty(), onClick = {
+                        if (!single) TextButton(enabled = selected.isNotEmpty(), onClick = {
                             val byId = pool.associateBy { it.uuid }
                             onConfirm(selected.mapNotNull { byId[it] })
                         }) { Text(if (selected.isEmpty()) "Add" else "Add (${selected.size})") }
@@ -115,11 +119,14 @@ fun ExercisePickerDialog(
                 item { CatalogFilters(query, { query = it }, categories, category, { category = it }) }
                 items(filtered, key = { it.uuid }) { exercise ->
                     val checked = exercise.uuid in selected
-                    val toggle = { if (checked) selected.remove(exercise.uuid) else selected.add(exercise.uuid) }
+                    val toggle = {
+                        if (single) onConfirm(listOf(exercise))
+                        else if (checked) selected.remove(exercise.uuid) else selected.add(exercise.uuid)
+                    }
                     ListItem(
                         headlineContent = { Text(exercise.name) },
                         supportingContent = { Text(exercise.catalogSubtitle()) },
-                        trailingContent = { Checkbox(checked = checked, onCheckedChange = { toggle() }) },
+                        trailingContent = { if (!single) Checkbox(checked = checked, onCheckedChange = { toggle() }) },
                         modifier = Modifier.clickable { toggle() },
                     )
                 }

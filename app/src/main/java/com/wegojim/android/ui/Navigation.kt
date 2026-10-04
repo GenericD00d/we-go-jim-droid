@@ -38,6 +38,8 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavHostController
+import androidx.navigation.NavType
+import androidx.navigation.navArgument
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
@@ -53,11 +55,13 @@ object Routes {
     const val PROGRESS = "progress"
     const val EXERCISES = "exercises"
     const val WORKOUT = "workout"
-    const val TEMPLATE = "template/{id}"
+    const val TEMPLATE = "template/{id}?folder={folder}"
+    const val EDIT_WORKOUT = "editWorkout/{id}"
     const val WORKOUT_DETAIL = "workoutDetail/{id}?summary={summary}"
     const val EXERCISE_DETAIL = "exercise/{uuid}"
 
-    fun template(id: String) = "template/$id"
+    fun template(id: String, folderId: String? = null) = "template/$id" + (folderId?.let { "?folder=$it" } ?: "")
+    fun editWorkout(id: String) = "editWorkout/$id"
     fun workoutDetail(id: String, summary: Boolean = false) = "workoutDetail/$id?summary=$summary"
     fun exercise(uuid: String) = "exercise/$uuid"
 }
@@ -111,7 +115,11 @@ fun WgjRoot() {
             composable(Routes.EXERCISES) { ExercisesScreen(nav) }
             composable(Routes.PROFILE) { ProfileScreen() }
             composable(Routes.WORKOUT) { ActiveWorkoutScreen(nav) }
-            composable(Routes.TEMPLATE) { TemplateEditorScreen(nav, it.arguments?.getString("id") ?: "new") }
+            composable(
+                Routes.TEMPLATE,
+                arguments = listOf(navArgument("folder") { type = NavType.StringType; nullable = true; defaultValue = null }),
+            ) { TemplateEditorScreen(nav, it.arguments?.getString("id") ?: "new", it.arguments?.getString("folder")) }
+            composable(Routes.EDIT_WORKOUT) { EditWorkoutScreen(nav, it.arguments?.getString("id")!!) }
             composable(Routes.WORKOUT_DETAIL) {
                 WorkoutDetailScreen(nav, it.arguments?.getString("id")!!, it.arguments?.getString("summary") == "true")
             }

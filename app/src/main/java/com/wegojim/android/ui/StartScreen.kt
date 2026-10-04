@@ -15,6 +15,11 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Bolt
+import androidx.compose.material.icons.filled.CreateNewFolder
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.ViewList
@@ -38,6 +43,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -49,6 +55,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import com.wegojim.android.app
 import com.wegojim.android.data.TemplateEntity
+import com.wegojim.android.data.TemplateFolderEntity
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -59,15 +66,20 @@ fun StartScreen(nav: NavHostController) {
     val store = context.app.activeWorkout
     val scope = rememberCoroutineScope()
     val templates by repo.templates.collectAsStateWithLifecycle(emptyList())
+    val folders by repo.folders.collectAsStateWithLifecycle(emptyList())
+    var collapsed by rememberSaveable { mutableStateOf(setOf<String>()) }
+    var creatingFolder by remember { mutableStateOf(false) }
+    var renamingFolder by remember { mutableStateOf<TemplateFolderEntity?>(null) }
+    var deletingFolder by remember { mutableStateOf<TemplateFolderEntity?>(null) }
     val active by store.state.collectAsStateWithLifecycle()
 
     var preview by remember { mutableStateOf<TemplateEntity?>(null) }
-    var pendingStart by remember { mutableStateOf<(() -> Unit)?>(null) }
+    var pendingStart by remember { mutableStateOf<(suspend () -> Unit)?>(null) }
     var deleting by remember { mutableStateOf<TemplateEntity?>(null) }
 
     // Starting a new workout replaces any in-progress one, so confirm first.
-    fun begin(action: () -> Unit) {
-        if (store.isActive) pendingStart = action else {
+    fun begin(action: suspend () -> Unit) {
+        if (store.isActive) pendingStart = action else scope.launch {
             action()
             nav.navigate(Routes.WORKOUT)
         }
@@ -101,6 +113,9 @@ fun StartScreen(nav: NavHostController) {
             }
             item {
                 SectionHeader("Templates") {
+                    TextButton(onClick = { creatingFolder = true }) {
+                        Icon(Icons.Default.CreateNewFolder, null); Text(" Folder")
+                    }
                     TextButton(onClick = { nav.navigate(Routes.template("new")) }) {
                         Icon(Icons.Default.Add, null); Text("New")
                     }
@@ -115,14 +130,35 @@ fun StartScreen(nav: NavHostController) {
                     )
                 }
             }
-            items(templates, key = { it.id }) { template ->
-                TemplateCard(
-                    template = template,
-                    onClick = { preview = template },
-                    onEdit = { nav.navigate(Routes.template(template.id)) },
-                    onDuplicate = { scope.launch { repo.duplicateTemplate(template.id) } },
-                    onDelete = { deleting = template },
-                )
+            val folderIds = folders.map { it.id }.toSet()
+            val sections = folders.map { it to templates.filter { t -> t.folderId == it.id } } +
+                listOf(null to templates.filter { it.folderId !in folderIds })
+            sections.forEach { (folder, list) ->
+                val key = folder?.id ?: "none"
+                if (folders.isNotEmpty() && (folder != null || list.isNotEmpty())) {
+                    item(key = "folder-$key") {
+                        FolderHeader(
+                            name = folder?.name ?: "No folder",
+                            count = list.size,
+                            expanded = key !in collapsed,
+                            onToggle = { collapsed = if (key in collapsed) collapsed - key else collapsed + key },
+                            onNewTemplate = folder?.let { { nav.navigate(Routes.template("new", it.id)) } },
+                            onRename = folder?.let { { renamingFolder = it } },
+                            onDelete = folder?.let { { deletingFolder = it } },
+                        )
+                    }
+                }
+                if (key !in collapsed) {
+                    items(list, key = { it.id }) { template ->
+                        TemplateCard(
+                            template = template,
+                            onClick = { preview = template },
+                            onEdit = { nav.navigate(Routes.template(template.id)) },
+                            onDuplicate = { scope.launch { repo.duplicateTemplate(template.id) } },
+                            onDelete = { deleting = template },
+                        )
+                    }
+                }
             }
         }
     }
@@ -152,11 +188,40 @@ fun StartScreen(nav: NavHostController) {
                 TextButton(onClick = {
                     pendingStart = null
                     store.discard()
-                    action()
-                    nav.navigate(Routes.WORKOUT)
+                    scope.launch {
+                        action()
+                        nav.navigate(Routes.WORKOUT)
+                    }
                 }) { Text("Discard & Start", color = MaterialTheme.colorScheme.error) }
             },
             dismissButton = { TextButton(onClick = { pendingStart = null }) { Text("Keep Current") } },
+        )
+    }
+
+    if (creatingFolder) {
+        NameDialog("New folder", "", confirm = "Create", onDismiss = { creatingFolder = false }) { name ->
+            creatingFolder = false
+            scope.launch { repo.createFolder(name) }
+        }
+    }
+    renamingFolder?.let { folder ->
+        NameDialog("Rename folder", folder.name, onDismiss = { renamingFolder = null }) { name ->
+            renamingFolder = null
+            scope.launch { repo.renameFolder(folder, name) }
+        }
+    }
+    deletingFolder?.let { folder ->
+        AlertDialog(
+            onDismissRequest = { deletingFolder = null },
+            title = { Text("Delete folder \"${folder.name}\"?") },
+            text = { Text("Templates in this folder are kept and moved to \"No folder\".") },
+            confirmButton = {
+                TextButton(onClick = {
+                    deletingFolder = null
+                    scope.launch { repo.deleteFolder(folder.id) }
+                }) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = { TextButton(onClick = { deletingFolder = null }) { Text("Cancel") } },
         )
     }
 
@@ -191,7 +256,11 @@ private fun TemplateCard(
                 Text(template.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                 val sets = template.exercises.sumOf { it.workingSets.size }
                 Text(
-                    "${template.exercises.size} exercises · $sets sets",
+                    listOfNotNull(
+                        plural(template.exercises.size, "exercise"),
+                        plural(sets, "set"),
+                        template.cardio.takeIf { it.isNotEmpty() }?.let { "${it.size} cardio" },
+                    ).joinToString(" · "),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -221,6 +290,12 @@ private fun TemplatePreview(template: TemplateEntity, onStart: () -> Unit, onEdi
     Column(Modifier.padding(horizontal = 20.dp).padding(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text(template.name, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
         if (template.notes.isNotBlank()) Text(template.notes, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        template.cardio.forEach { c ->
+            Row {
+                Text(c.name, Modifier.weight(1f), fontWeight = FontWeight.Medium, color = Wgj.colors.cyan)
+                Text("${c.role.label} · ${cardioGoalSummary(c)}", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
         template.exercises.forEach { e ->
             Row {
                 Text(e.name, Modifier.weight(1f), fontWeight = FontWeight.Medium)
@@ -237,9 +312,38 @@ private fun TemplatePreview(template: TemplateEntity, onStart: () -> Unit, onEdi
             }
         }
         Spacer(Modifier.height(8.dp))
-        Button(onClick = onStart, Modifier.fillMaxWidth(), enabled = template.exercises.isNotEmpty()) {
+        Button(onClick = onStart, Modifier.fillMaxWidth(), enabled = template.exercises.isNotEmpty() || template.cardio.isNotEmpty()) {
             Icon(Icons.Default.PlayArrow, null); Spacer(Modifier.width(6.dp)); Text("Start Workout")
         }
         FilledTonalButton(onClick = onEdit, Modifier.fillMaxWidth()) { Text("Edit Template") }
+    }
+}
+
+@Composable
+private fun FolderHeader(
+    name: String,
+    count: Int,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+    onNewTemplate: (() -> Unit)?,
+    onRename: (() -> Unit)?,
+    onDelete: (() -> Unit)?,
+) {
+    var menu by remember { mutableStateOf(false) }
+    Row(Modifier.fillMaxWidth().clickableNoRipple(onToggle), verticalAlignment = Alignment.CenterVertically) {
+        Icon(if (expanded) Icons.Default.FolderOpen else Icons.Default.Folder, null, tint = MaterialTheme.colorScheme.primary)
+        Text(" $name", Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+        Text("$count", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Icon(if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore, if (expanded) "Collapse" else "Expand")
+        if (onRename != null) {
+            Box {
+                IconButton(onClick = { menu = true }) { Icon(Icons.Default.MoreVert, "Folder actions") }
+                DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                    onNewTemplate?.let { DropdownMenuItem(text = { Text("New template here") }, onClick = { menu = false; it() }) }
+                    DropdownMenuItem(text = { Text("Rename") }, onClick = { menu = false; onRename() })
+                    onDelete?.let { DropdownMenuItem(text = { Text("Delete folder", color = MaterialTheme.colorScheme.error) }, onClick = { menu = false; it() }) }
+                }
+            }
+        }
     }
 }

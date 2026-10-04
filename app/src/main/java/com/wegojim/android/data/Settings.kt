@@ -13,6 +13,7 @@ data class UserSettings(
     val defaultRestSeconds: Int = 120,
     val autoStartRestTimer: Boolean = true,
     val keepScreenAwake: Boolean = false,
+    val distanceUnit: DistanceUnit = DistanceUnit.kilometers,
 )
 
 class SettingsStore(context: Context) {
@@ -33,6 +34,7 @@ class SettingsStore(context: Context) {
             putInt("defaultRestSeconds", next.defaultRestSeconds)
             putBoolean("autoStartRestTimer", next.autoStartRestTimer)
             putBoolean("keepScreenAwake", next.keepScreenAwake)
+            putString("distanceUnit", next.distanceUnit.name)
         }
         _state.value = next
     }
@@ -44,5 +46,10 @@ class SettingsStore(context: Context) {
         defaultRestSeconds = prefs.getInt("defaultRestSeconds", 120),
         autoStartRestTimer = prefs.getBoolean("autoStartRestTimer", true),
         keepScreenAwake = prefs.getBoolean("keepScreenAwake", false),
+        distanceUnit = runCatching { DistanceUnit.valueOf(prefs.getString("distanceUnit", null)!!) }.getOrDefault(regionalDistanceUnit()),
     )
 }
+
+/** Miles in the US and UK, kilometers elsewhere (matches the iOS regional default). */
+fun regionalDistanceUnit(): DistanceUnit =
+    if (java.util.Locale.getDefault().country in setOf("US", "GB", "LR", "MM")) DistanceUnit.miles else DistanceUnit.kilometers

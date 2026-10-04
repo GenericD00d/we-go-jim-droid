@@ -1,6 +1,8 @@
 package com.wegojim.android.ui
 
+import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -15,8 +17,11 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -40,6 +45,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import com.wegojim.android.app
 import com.wegojim.android.data.LoadUnit
+import com.wegojim.android.data.SetEntry
 import com.wegojim.android.data.WorkoutEntity
 import kotlinx.coroutines.launch
 
@@ -89,7 +95,7 @@ private fun WorkoutCard(workout: WorkoutEntity, unit: LoadUnit, onClick: () -> U
             Meta("Volume", formatVolume(workout.totalVolumeKg, unit))
         }
         Text(
-            workout.exercises.joinToString(" · ") { "${it.sets.size}× ${it.name}" },
+            (workout.cardio.map { it.name } + workout.exercises.map { "${it.sets.size}× ${it.name}" }).joinToString(" · "),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             maxLines = 2,
@@ -114,6 +120,9 @@ fun WorkoutDetailScreen(nav: NavHostController, workoutId: String, isSummary: Bo
     val unit = app.settings.state.collectAsStateWithLifecycle().value.weightUnit
     val scope = rememberCoroutineScope()
     var confirmDelete by remember { mutableStateOf(false) }
+    var savingTemplate by remember { mutableStateOf(false) }
+    var menu by remember { mutableStateOf(false) }
+    val context = LocalContext.current
 
     Scaffold(
         topBar = {
@@ -123,7 +132,20 @@ fun WorkoutDetailScreen(nav: NavHostController, workoutId: String, isSummary: Bo
                     if (!isSummary) IconButton(onClick = { nav.popBackStack() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") }
                 },
                 actions = {
-                    if (!isSummary) IconButton(onClick = { confirmDelete = true }) { Icon(Icons.Default.Delete, "Delete workout") }
+                    Box {
+                        IconButton(onClick = { menu = true }) { Icon(Icons.Default.MoreVert, "Workout actions") }
+                        DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                            DropdownMenuItem(text = { Text("Edit workout") }, onClick = { menu = false; nav.navigate(Routes.editWorkout(workoutId)) })
+                            DropdownMenuItem(text = { Text("Save as template") }, onClick = { menu = false; savingTemplate = true })
+                            if (!isSummary) {
+                                DropdownMenuItem(
+                                    text = { Text("Delete workout", color = MaterialTheme.colorScheme.error) },
+                                    leadingIcon = { Icon(Icons.Default.Delete, null, tint = MaterialTheme.colorScheme.error) },
+                                    onClick = { menu = false; confirmDelete = true },
+                                )
+                            }
+                        }
+                    }
                 },
             )
         },
@@ -145,7 +167,7 @@ fun WorkoutDetailScreen(nav: NavHostController, workoutId: String, isSummary: Bo
             item {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     StatTile("Duration", formatDuration(w.durationSeconds), Modifier.weight(1f))
-                    StatTile("Sets", w.completedSetCount.toString(), Modifier.weight(1f))
+                    StatTile(if (w.exercises.isEmpty()) "Cardio" else "Sets", if (w.exercises.isEmpty()) formatDuration(w.cardioSeconds) else w.completedSetCount.toString(), Modifier.weight(1f))
                 }
                 Spacer(Modifier.padding(4.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -167,6 +189,12 @@ fun WorkoutDetailScreen(nav: NavHostController, workoutId: String, isSummary: Bo
                     }
                 }
             }
+            items(w.cardio, key = { it.id }) { block ->
+                SectionCard(onClick = { nav.navigate(Routes.exercise(block.exerciseUuid)) }) {
+                    Text(block.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = Wgj.colors.cyan)
+                    Text("${block.role.label} · ${cardioResultSummary(block)}")
+                }
+            }
             items(w.exercises, key = { it.id }) { exercise ->
                 SectionCard(onClick = { nav.navigate(Routes.exercise(exercise.exerciseUuid)) }) {
                     Text(exercise.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
@@ -182,6 +210,13 @@ fun WorkoutDetailScreen(nav: NavHostController, workoutId: String, isSummary: Bo
                             Text(formatSet(set), Modifier.weight(1f))
                             if (set.isPr) PrBadge()
                         }
+                        set.dropStages.forEach { d ->
+                            Text(
+                                "      ↳ " + formatSet(SetEntry(reps = d.reps, weight = d.weight, unit = d.unit)),
+                                color = Wgj.colors.warning,
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                        }
                     }
                 }
             }
@@ -192,6 +227,17 @@ fun WorkoutDetailScreen(nav: NavHostController, workoutId: String, isSummary: Bo
                 item {
                     Button(onClick = { nav.popBackStack(Routes.START, inclusive = false) }, Modifier.fillMaxWidth()) { Text("Done") }
                 }
+            }
+        }
+    }
+
+    if (savingTemplate) {
+        NameDialog("Save as template", workout?.name ?: "", onDismiss = { savingTemplate = false }) { name ->
+            savingTemplate = false
+            val w = workout ?: return@NameDialog
+            scope.launch {
+                app.repository.saveAsTemplate(name, w.exercises, w.cardio, w.notes)
+                Toast.makeText(context, "Template \"$name\" saved", Toast.LENGTH_SHORT).show()
             }
         }
     }

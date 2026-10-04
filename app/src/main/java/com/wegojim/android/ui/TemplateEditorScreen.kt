@@ -16,9 +16,13 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.DirectionsRun
+import androidx.compose.material.icons.filled.SubdirectoryArrowRight
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
@@ -26,7 +30,9 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.InputChip
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
@@ -51,6 +57,10 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
 import com.wegojim.android.app
+import com.wegojim.android.data.CardioBlock
+import com.wegojim.android.data.CardioPhase
+import com.wegojim.android.data.CardioRole
+import com.wegojim.android.data.DropStage
 import com.wegojim.android.data.ExerciseEntity
 import com.wegojim.android.data.ExerciseEntry
 import com.wegojim.android.data.LoadUnit
@@ -58,8 +68,10 @@ import com.wegojim.android.data.Repository
 import com.wegojim.android.data.SetEntry
 import com.wegojim.android.data.SettingsStore
 import com.wegojim.android.data.TemplateEntity
-import com.wegojim.android.data.moved
+import com.wegojim.android.data.WorkoutEditing
+import com.wegojim.android.data.newCardioBlock
 import com.wegojim.android.data.newExerciseEntry
+import com.wegojim.android.data.toRef
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -68,6 +80,7 @@ class TemplateEditorViewModel(
     private val repo: Repository,
     private val settings: SettingsStore,
     templateId: String,
+    folderId: String?,
 ) : ViewModel() {
     val state = MutableStateFlow<TemplateEntity?>(null)
     private var original: TemplateEntity? = null
@@ -75,7 +88,7 @@ class TemplateEditorViewModel(
 
     init {
         viewModelScope.launch {
-            val template = (if (isNew) null else repo.template(templateId)) ?: TemplateEntity()
+            val template = (if (isNew) null else repo.template(templateId)) ?: TemplateEntity(folderId = folderId)
             original = template
             state.value = template
         }
@@ -85,26 +98,22 @@ class TemplateEditorViewModel(
 
     fun update(transform: (TemplateEntity) -> TemplateEntity) = state.update { it?.let(transform) }
 
-    fun updateExercise(id: String, transform: (ExerciseEntry) -> ExerciseEntry) =
-        update { t -> t.copy(exercises = t.exercises.map { if (it.id == id) transform(it) else it }) }
+    fun exercises(f: (List<ExerciseEntry>) -> List<ExerciseEntry>) = update { it.copy(exercises = f(it.exercises)) }
 
-    fun updateSet(exerciseId: String, setId: String, transform: (SetEntry) -> SetEntry) =
-        updateExercise(exerciseId) { e -> e.copy(sets = e.sets.map { if (it.id == setId) transform(it) else it }) }
+    fun updateExercise(id: String, f: (ExerciseEntry) -> ExerciseEntry) = exercises { WorkoutEditing.updateExercise(it, id, f) }
 
-    fun addExercises(items: List<ExerciseEntity>) =
-        update { t -> t.copy(exercises = t.exercises + items.map { newExerciseEntry(it, settings.state.value) }) }
+    fun updateSet(exerciseId: String, setId: String, f: (SetEntry) -> SetEntry) = exercises { WorkoutEditing.updateSet(it, exerciseId, setId, f) }
 
-    fun addSet(exerciseId: String, warmup: Boolean) = updateExercise(exerciseId) { e ->
-        val last = e.sets.lastOrNull { it.isWarmup == warmup } ?: e.sets.lastOrNull()
-        val set = SetEntry(
-            isWarmup = warmup,
-            targetReps = last?.targetReps,
-            targetWeight = last?.targetWeight,
-            unit = last?.unit ?: settings.state.value.weightUnit,
-        )
-        val sets = if (warmup) e.sets.toMutableList().apply { add(e.sets.indexOfLast { it.isWarmup } + 1, set) } else e.sets + set
-        e.copy(sets = sets)
+    fun updateDrop(exerciseId: String, setId: String, dropId: String, f: (DropStage) -> DropStage) =
+        exercises { WorkoutEditing.updateDrop(it, exerciseId, setId, dropId, f) }
+
+    fun addExercises(items: List<ExerciseEntity>) = exercises { list ->
+        list + items.map { newExerciseEntry(it, settings.state.value.weightUnit, settings.state.value.defaultRestSeconds) }
     }
+
+    fun addSet(exerciseId: String, warmup: Boolean) = exercises { WorkoutEditing.addSet(it, exerciseId, warmup, settings.state.value.weightUnit) }
+
+    fun updateCardio(id: String, f: (CardioBlock) -> CardioBlock) = update { t -> t.copy(cardio = t.cardio.map { if (it.id == id) f(it) else it }) }
 
     suspend fun save() {
         val template = state.value ?: return
@@ -115,14 +124,18 @@ class TemplateEditorViewModel(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun TemplateEditorScreen(nav: NavHostController, templateId: String) {
+fun TemplateEditorScreen(nav: NavHostController, templateId: String, folderId: String? = null) {
     val app = LocalContext.current.app
     val vm: TemplateEditorViewModel = viewModel(key = "template-$templateId") {
-        TemplateEditorViewModel(app.repository, app.settings, templateId)
+        TemplateEditorViewModel(app.repository, app.settings, templateId, folderId)
     }
     val template by vm.state.collectAsStateWithLifecycle()
+    val folders by app.repository.folders.collectAsStateWithLifecycle(emptyList())
+    val distanceUnit = app.settings.state.collectAsStateWithLifecycle().value.distanceUnit
     val scope = rememberCoroutineScope()
     var picking by remember { mutableStateOf(false) }
+    var pickingCardio by remember { mutableStateOf(false) }
+    var cardioSetup by remember { mutableStateOf<CardioBlock?>(null) }
     var confirmDiscard by remember { mutableStateOf(false) }
 
     val leave = { if (vm.isDirty) confirmDiscard = true else nav.popBackStack() }
@@ -143,6 +156,7 @@ fun TemplateEditorScreen(nav: NavHostController, templateId: String) {
         },
     ) { padding ->
         val t = template ?: return@Scaffold
+        val labels = WorkoutEditing.supersetLabels(t.exercises)
         LazyColumn(
             modifier = Modifier.imePadding(),
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = padding.calculateTopPadding() + 4.dp, bottom = padding.calculateBottomPadding() + 24.dp),
@@ -163,19 +177,45 @@ fun TemplateEditorScreen(nav: NavHostController, templateId: String) {
                         label = { Text("Notes (optional)") },
                         modifier = Modifier.fillMaxWidth(),
                     )
+                    if (folders.isNotEmpty()) {
+                        val options = listOf("No folder") + folders.map { it.name }
+                        Dropdown("Folder", folders.firstOrNull { it.id == t.folderId }?.name ?: "No folder", options) { name ->
+                            vm.update { it.copy(folderId = folders.firstOrNull { f -> f.name == name }?.id) }
+                        }
+                    }
                 }
             }
-            items(t.exercises, key = { it.id }) { exercise ->
-                TemplateExerciseCard(
-                    exercise = exercise,
-                    vm = vm,
-                    onMove = { delta -> vm.update { it.copy(exercises = it.exercises.moved(exercise.id, delta) { e -> e.id }) } },
-                    onRemove = { vm.update { it.copy(exercises = it.exercises.filterNot { e -> e.id == exercise.id }) } },
-                )
+            items(t.cardio.filter { it.phase == CardioPhase.preWorkout }, key = { it.id }) { block ->
+                CardioPlanCard(block, onChange = { c -> vm.updateCardio(block.id) { c } }, onRemove = { vm.update { it.copy(cardio = it.cardio.filterNot { c -> c.id == block.id }) } })
+            }
+            WorkoutEditing.blocks(t.exercises).forEach { block ->
+                if (block.size > 1) {
+                    item(key = "superset-" + block.first().supersetGroupId) {
+                        val first = block.first()
+                        val rest = first.supersetRestSeconds ?: first.restSeconds
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Link, null, tint = Wgj.colors.gold, modifier = Modifier.size(18.dp))
+                            Text(" Superset · round rest ${formatRest(rest)}", Modifier.weight(1f), color = Wgj.colors.gold, fontWeight = FontWeight.SemiBold)
+                            TextButton(onClick = { vm.exercises { WorkoutEditing.setSupersetRest(it, first.supersetGroupId!!, rest - 15) } }) { Text("−15s") }
+                            TextButton(onClick = { vm.exercises { WorkoutEditing.setSupersetRest(it, first.supersetGroupId!!, rest + 15) } }) { Text("+15s") }
+                        }
+                    }
+                }
+                items(block, key = { it.id }) { exercise ->
+                    TemplateExerciseCard(exercise, labels[exercise.id], t.exercises, vm)
+                }
+            }
+            items(t.cardio.filter { it.phase == CardioPhase.postWorkout }, key = { it.id }) { block ->
+                CardioPlanCard(block, onChange = { c -> vm.updateCardio(block.id) { c } }, onRemove = { vm.update { it.copy(cardio = it.cardio.filterNot { c -> c.id == block.id }) } })
             }
             item {
-                Button(onClick = { picking = true }, Modifier.fillMaxWidth()) {
-                    Icon(Icons.Default.Add, null); Spacer(Modifier.width(6.dp)); Text("Add Exercises")
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = { picking = true }, Modifier.weight(1f)) {
+                        Icon(Icons.Default.Add, null); Spacer(Modifier.width(4.dp)); Text("Exercises")
+                    }
+                    OutlinedButton(onClick = { pickingCardio = true }, Modifier.weight(1f)) {
+                        Icon(Icons.AutoMirrored.Filled.DirectionsRun, null); Spacer(Modifier.width(4.dp)); Text("Cardio")
+                    }
                 }
             }
         }
@@ -183,6 +223,24 @@ fun TemplateEditorScreen(nav: NavHostController, templateId: String) {
 
     if (picking) {
         ExercisePickerDialog(onDismiss = { picking = false }, onConfirm = { vm.addExercises(it); picking = false })
+    }
+    if (pickingCardio) {
+        ExercisePickerDialog(onDismiss = { pickingCardio = false }, mode = PickerMode.Cardio, single = true, onConfirm = {
+            pickingCardio = false
+            val hasExercises = template?.exercises?.isNotEmpty() == true
+            cardioSetup = newCardioBlock(
+                it.first(),
+                if (hasExercises) CardioPhase.postWorkout else CardioPhase.preWorkout,
+                if (hasExercises) CardioRole.finisher else CardioRole.warmUp,
+                distanceUnit,
+            )
+        })
+    }
+    cardioSetup?.let { block ->
+        CardioSetupDialog(block, onDismiss = { cardioSetup = null }, onSave = { c ->
+            vm.update { it.copy(cardio = it.cardio + c) }
+            cardioSetup = null
+        })
     }
     if (confirmDiscard) {
         AlertDialog(
@@ -196,26 +254,57 @@ fun TemplateEditorScreen(nav: NavHostController, templateId: String) {
 }
 
 @Composable
-private fun TemplateExerciseCard(
-    exercise: ExerciseEntry,
-    vm: TemplateEditorViewModel,
-    onMove: (Int) -> Unit,
-    onRemove: () -> Unit,
-) {
+private fun TemplateExerciseCard(exercise: ExerciseEntry, supersetLabel: String?, all: List<ExerciseEntry>, vm: TemplateEditorViewModel) {
+    var addingAlternative by remember { mutableStateOf(false) }
+    var replacing by remember { mutableStateOf(false) }
+    var editingNotes by remember { mutableStateOf(false) }
     SectionCard {
-        ExerciseCardHeader(exercise, onMove = onMove, onRemove = onRemove)
+        ExerciseCardHeader(
+            exercise,
+            badge = supersetLabel,
+            onMove = { delta -> vm.exercises { WorkoutEditing.move(it, exercise.id, delta) } },
+            onRemove = { vm.exercises { WorkoutEditing.remove(it, exercise.id) } },
+        ) { dismiss ->
+            DropdownMenuItem(text = { Text("Replace exercise") }, onClick = { dismiss(); replacing = true })
+            DropdownMenuItem(text = { Text("Add rotating alternative") }, onClick = { dismiss(); addingAlternative = true })
+            DropdownMenuItem(text = { Text(if (exercise.notes.isBlank()) "Add notes" else "Edit notes") }, onClick = { dismiss(); editingNotes = true })
+            if (exercise.supersetGroupId != null) {
+                DropdownMenuItem(text = { Text("Remove from superset") }, onClick = { dismiss(); vm.exercises { WorkoutEditing.unlinkSuperset(it, exercise.id) } })
+            } else if (WorkoutEditing.canSupersetWithNext(all, exercise.id)) {
+                DropdownMenuItem(text = { Text("Superset with next") }, onClick = { dismiss(); vm.exercises { WorkoutEditing.supersetWithNext(it, exercise.id) } })
+            }
+        }
+        if (exercise.notes.isNotBlank()) {
+            Text(exercise.notes, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        if (exercise.components.isNotEmpty()) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.Sync, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.secondary)
+                Text(" Rotates each session with:", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary)
+            }
+            exercise.components.forEach { alt ->
+                InputChip(
+                    selected = false,
+                    onClick = { vm.updateExercise(exercise.id) { e -> e.copy(components = e.components - alt) } },
+                    label = { Text(alt.name) },
+                    trailingIcon = { Icon(Icons.Default.Close, "Remove alternative", Modifier.size(16.dp)) },
+                )
+            }
+        }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("Rep range", Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurfaceVariant)
             NumberField(exercise.targetRepMin?.toDouble(), { v -> vm.updateExercise(exercise.id) { it.copy(targetRepMin = v?.toInt()) } }, Modifier.width(72.dp), "min", integer = true)
             Text("–")
             NumberField(exercise.targetRepMax?.toDouble(), { v -> vm.updateExercise(exercise.id) { it.copy(targetRepMax = v?.toInt()) } }, Modifier.width(72.dp), "max", integer = true)
         }
-        Stepper(
-            "Rest",
-            formatRest(exercise.restSeconds),
-            onDecrement = { vm.updateExercise(exercise.id) { it.copy(restSeconds = (it.restSeconds - 15).coerceAtLeast(0)) } },
-            onIncrement = { vm.updateExercise(exercise.id) { it.copy(restSeconds = it.restSeconds + 15) } },
-        )
+        if (exercise.supersetGroupId == null) {
+            Stepper(
+                "Rest",
+                formatRest(exercise.restSeconds),
+                onDecrement = { vm.updateExercise(exercise.id) { it.copy(restSeconds = (it.restSeconds - 15).coerceAtLeast(0)) } },
+                onIncrement = { vm.updateExercise(exercise.id) { it.copy(restSeconds = it.restSeconds + 15) } },
+            )
+        }
         var workingIndex = 0
         exercise.sets.forEach { set ->
             val label = if (set.isWarmup) "W" else (++workingIndex).toString()
@@ -223,9 +312,10 @@ private fun TemplateExerciseCard(
                 SetBadge(
                     label = label,
                     set = set,
-                    onToggleWarmup = { vm.updateSet(exercise.id, set.id) { it.copy(isWarmup = !it.isWarmup) } },
+                    onToggleWarmup = { vm.updateSet(exercise.id, set.id) { it.copy(isWarmup = !it.isWarmup, dropStages = emptyList()) } },
                     onUnit = { unit -> vm.updateSet(exercise.id, set.id) { it.copy(unit = unit) } },
-                    onDelete = { vm.updateExercise(exercise.id) { e -> e.copy(sets = e.sets.filterNot { it.id == set.id }) } },
+                    onDelete = { vm.exercises { WorkoutEditing.removeSet(it, exercise.id, set.id) } },
+                    onAddDrop = if (set.isWarmup) null else ({ vm.exercises { WorkoutEditing.addDrop(it, exercise.id, set.id) } }),
                 )
                 NumberField(
                     set.targetWeight,
@@ -242,10 +332,42 @@ private fun TemplateExerciseCard(
                     integer = true,
                 )
             }
+            set.dropStages.forEach { drop ->
+                Row(Modifier.padding(start = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.SubdirectoryArrowRight, "Drop stage", Modifier.size(20.dp), tint = Wgj.colors.warning)
+                    NumberField(drop.targetWeight, { v -> vm.updateDrop(exercise.id, set.id, drop.id) { it.copy(targetWeight = v) } }, Modifier.weight(1f), "Weight", suffix = drop.unit.label)
+                    NumberField(drop.targetReps?.toDouble(), { v -> vm.updateDrop(exercise.id, set.id, drop.id) { it.copy(targetReps = v?.toInt()) } }, Modifier.weight(0.8f), "Reps", integer = true)
+                    IconButton(onClick = { vm.exercises { WorkoutEditing.removeDrop(it, exercise.id, set.id, drop.id) } }, Modifier.size(32.dp)) {
+                        Icon(Icons.Default.Close, "Remove drop stage", Modifier.size(18.dp))
+                    }
+                }
+            }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             TextButton(onClick = { vm.addSet(exercise.id, warmup = false) }) { Icon(Icons.Default.Add, null); Text("Set") }
             TextButton(onClick = { vm.addSet(exercise.id, warmup = true) }) { Icon(Icons.Default.Add, null); Text("Warm-up") }
+        }
+    }
+
+    if (addingAlternative) {
+        ExercisePickerDialog(onDismiss = { addingAlternative = false }, single = true, title = "Alternative for ${exercise.name}", onConfirm = { picked ->
+            val ref = picked.first().toRef()
+            if (ref.exerciseUuid != exercise.exerciseUuid) {
+                vm.updateExercise(exercise.id) { e -> e.copy(components = (e.components + ref).distinctBy { it.exerciseUuid }) }
+            }
+            addingAlternative = false
+        })
+    }
+    if (replacing) {
+        ExercisePickerDialog(onDismiss = { replacing = false }, single = true, title = "Replace ${exercise.name}", onConfirm = {
+            vm.exercises { list -> WorkoutEditing.replaceExercise(list, exercise.id, it.first().toRef()) }
+            replacing = false
+        })
+    }
+    if (editingNotes) {
+        NotesDialog(exercise.notes, onDismiss = { editingNotes = false }) { notes ->
+            vm.updateExercise(exercise.id) { it.copy(notes = notes) }
+            editingNotes = false
         }
     }
 }
@@ -256,10 +378,17 @@ fun ExerciseCardHeader(
     exercise: ExerciseEntry,
     onMove: (Int) -> Unit,
     onRemove: () -> Unit,
+    badge: String? = null,
     extraMenu: @Composable (dismiss: () -> Unit) -> Unit = {},
 ) {
     var menu by remember { mutableStateOf(false) }
     Row(verticalAlignment = Alignment.CenterVertically) {
+        if (badge != null) {
+            Surface(color = Wgj.colors.gold.copy(alpha = 0.2f), shape = MaterialTheme.shapes.small) {
+                Text(badge, Modifier.padding(horizontal = 8.dp, vertical = 4.dp), color = Wgj.colors.gold, fontWeight = FontWeight.Bold)
+            }
+            Spacer(Modifier.width(10.dp))
+        }
         Column(Modifier.weight(1f)) {
             Text(exercise.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
             if (exercise.muscleSummary.isNotBlank()) {
@@ -286,6 +415,7 @@ fun SetBadge(
     onToggleWarmup: () -> Unit,
     onUnit: (LoadUnit) -> Unit,
     onDelete: () -> Unit,
+    onAddDrop: (() -> Unit)? = null,
 ) {
     var menu by remember { mutableStateOf(false) }
     Box {
@@ -304,6 +434,9 @@ fun SetBadge(
                 text = { Text(if (set.isWarmup) "Make working set" else "Make warm-up set") },
                 onClick = { menu = false; onToggleWarmup() },
             )
+            if (onAddDrop != null) {
+                DropdownMenuItem(text = { Text("Add drop stage") }, onClick = { menu = false; onAddDrop() })
+            }
             LoadUnit.entries.filter { it != set.unit }.forEach { unit ->
                 DropdownMenuItem(
                     text = { Text(if (unit == LoadUnit.bodyweight) "Use bodyweight" else "Use ${unit.label}") },
