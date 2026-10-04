@@ -12,13 +12,17 @@ import com.wegojim.android.ui.importTemplateUri
 import kotlinx.coroutines.launch
 import com.wegojim.android.ui.WgjRoot
 import com.wegojim.android.ui.WgjTheme
+import com.wegojim.android.ui.AppTheme
+import androidx.compose.runtime.getValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            WgjTheme {
+            val settings by app.settings.state.collectAsStateWithLifecycle()
+            WgjTheme(theme = AppTheme.of(settings.appTheme)) {
                 WgjRoot()
             }
         }

@@ -58,7 +58,9 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import com.wegojim.android.app
+import com.wegojim.android.data.Birthday
 import com.wegojim.android.data.CalorieEstimator
+import com.wegojim.android.data.GymEasterEgg
 import com.wegojim.android.data.LoadUnit
 import com.wegojim.android.data.MuscleHeatmap
 import com.wegojim.android.data.SetEntry
@@ -180,6 +182,7 @@ fun WorkoutDetailScreen(nav: NavHostController, workoutId: String, isSummary: Bo
     val cardLayer = rememberGraphicsLayer()
     val context = LocalContext.current
 
+    Box {
     Scaffold(
         topBar = {
             TopAppBar(
@@ -218,6 +221,20 @@ fun WorkoutDetailScreen(nav: NavHostController, workoutId: String, isSummary: Bo
             item {
                 Column {
                     if (isSummary) Text(w.name, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                    if (isSummary) {
+                        val settings = app.settings.state.collectAsStateWithLifecycle().value
+                        val catalog by app.repository.exercises.collectAsStateWithLifecycle(emptyList())
+                        val joke = remember(w, catalog) {
+                            GymEasterEgg.completionMessage(
+                                w.id,
+                                w.exercises.sumOf { e -> e.sets.count { !it.isWarmup } },
+                                w.prCount > 0,
+                                GymEasterEgg.isLegDay(MuscleHeatmap.build(listOf(w), catalog.associateBy { it.uuid })),
+                                settings.gymBroMode,
+                            )
+                        }
+                        joke?.let { Text(it, color = Wgj.colors.gold, fontWeight = FontWeight.Bold) }
+                    }
                     Text(
                         "${formatDate(w.startedAt)} · ${formatTime(w.startedAt)} – ${formatTime(w.endedAt)}",
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -305,6 +322,12 @@ fun WorkoutDetailScreen(nav: NavHostController, workoutId: String, isSummary: Bo
                 }
             }
         }
+    }
+
+    if (isSummary) {
+        val settings = app.settings.state.collectAsStateWithLifecycle().value
+        Confetti(workoutId, festive = AppTheme.of(settings.appTheme) == AppTheme.christmas || Birthday.isBirthday(settings.birthDate))
+    }
     }
 
     if (savingTemplate) {

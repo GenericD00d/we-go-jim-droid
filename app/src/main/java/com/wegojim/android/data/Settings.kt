@@ -23,6 +23,12 @@ data class UserSettings(
     val bodyWeightKg: Double? = null,
     val showCalories: Boolean = true,
     val healthConnectExport: Boolean = false,
+    val appTheme: String = "original",
+    val athleteType: String? = null,
+    val trainingGuidance: Boolean = true,
+    val gymBroMode: Boolean = false,
+    /** Bumped when the avatar file changes so the UI reloads it. */
+    val avatarVersion: Long = 0,
     val dashboard: List<DashboardWidget> = DashboardWidget.defaults,
 ) {
     val calorieProfile: CalorieProfile get() = CalorieProfile(sex, birthDate, heightCm, bodyWeightKg)
@@ -83,6 +89,11 @@ class SettingsStore(context: Context) {
             putString("bodyWeightKg", next.bodyWeightKg?.toString())
             putBoolean("showCalories", next.showCalories)
             putBoolean("healthConnectExport", next.healthConnectExport)
+            putString("appTheme", next.appTheme)
+            putString("athleteType", next.athleteType)
+            putBoolean("trainingGuidance", next.trainingGuidance)
+            putBoolean("gymBroMode", next.gymBroMode)
+            putLong("avatarVersion", next.avatarVersion)
             putString("dashboard", AppJson.encodeToString(ListSerializer(DashboardWidget.serializer()), next.dashboard))
         }
         _state.value = next
@@ -102,6 +113,11 @@ class SettingsStore(context: Context) {
         bodyWeightKg = prefs.getString("bodyWeightKg", null)?.toDoubleOrNull(),
         showCalories = prefs.getBoolean("showCalories", true),
         healthConnectExport = prefs.getBoolean("healthConnectExport", false),
+        appTheme = prefs.getString("appTheme", "original") ?: "original",
+        athleteType = prefs.getString("athleteType", null),
+        trainingGuidance = prefs.getBoolean("trainingGuidance", true),
+        gymBroMode = prefs.getBoolean("gymBroMode", false),
+        avatarVersion = prefs.getLong("avatarVersion", 0),
         dashboard = prefs.getString("dashboard", null)?.let {
             runCatching { AppJson.decodeFromString(ListSerializer(DashboardWidget.serializer()), it) }.getOrNull()
         } ?: DashboardWidget.defaults,

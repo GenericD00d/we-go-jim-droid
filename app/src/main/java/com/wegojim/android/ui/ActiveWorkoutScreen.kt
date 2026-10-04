@@ -32,6 +32,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Timer
+import androidx.compose.material.icons.filled.TrackChanges
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
@@ -88,6 +89,7 @@ import com.wegojim.android.data.LoadUnit
 import com.wegojim.android.data.SetEntry
 import com.wegojim.android.data.SetFactEntity
 import com.wegojim.android.data.TemplateSyncPreview
+import com.wegojim.android.data.TrainingGuidance
 import com.wegojim.android.data.WorkoutEditing
 import com.wegojim.android.data.WorkoutEditor
 import com.wegojim.android.data.newCardioBlock
@@ -380,6 +382,7 @@ private fun ExerciseCard(exercise: ExerciseEntry, supersetLabel: String?, all: L
     val previousWorking = previous.filter { !it.isWarmup }
     var replacing by remember { mutableStateOf(false) }
     var editingNotes by remember { mutableStateOf(false) }
+    val guidanceEnabled = LocalContext.current.app.settings.state.collectAsStateWithLifecycle().value.trainingGuidance
 
     SectionCard {
         ExerciseCardHeader(
@@ -402,6 +405,7 @@ private fun ExerciseCard(exercise: ExerciseEntry, supersetLabel: String?, all: L
         if (exercise.notes.isNotBlank()) {
             Text(exercise.notes, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
+        if (guidanceEnabled && editor.isLive) GuidanceBanner(exercise)
         val repRange = when {
             exercise.targetRepMin != null && exercise.targetRepMax != null && exercise.targetRepMin != exercise.targetRepMax ->
                 "Target ${exercise.targetRepMin}-${exercise.targetRepMax} reps"
@@ -614,6 +618,30 @@ fun PrBadge() {
         Row(Modifier.padding(horizontal = 6.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
             Icon(Icons.Default.EmojiEvents, null, Modifier.size(14.dp), tint = Wgj.colors.gold)
             Text(" PR", style = MaterialTheme.typography.labelSmall, color = Wgj.colors.gold, fontWeight = FontWeight.Bold)
+        }
+    }
+}
+
+/** Collapsible coaching line from [TrainingGuidance] (port of TrainingGuidanceBannerView). */
+@Composable
+private fun GuidanceBanner(exercise: ExerciseEntry) {
+    val repo = LocalContext.current.app.repository
+    val catalog by repo.exercise(exercise.exerciseUuid).collectAsStateWithLifecycle(null)
+    val guidance = TrainingGuidance.forExercise(exercise, catalog)
+    var expanded by remember { mutableStateOf(false) }
+    val tint = when (guidance.tone) {
+        TrainingGuidance.Tone.Success -> Wgj.colors.success
+        TrainingGuidance.Tone.Caution -> Wgj.colors.warning
+        TrainingGuidance.Tone.Accent -> MaterialTheme.colorScheme.secondary
+    }
+    Surface(onClick = { expanded = !expanded }, color = tint.copy(alpha = 0.12f), shape = MaterialTheme.shapes.medium) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.TrackChanges, null, Modifier.size(18.dp), tint = tint)
+                Text("  " + guidance.title, Modifier.weight(1f), color = tint, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
+                guidance.badgeDetail?.let { Text(it, style = MaterialTheme.typography.labelMedium, color = tint) }
+            }
+            if (expanded) Text(guidance.summary, Modifier.padding(top = 4.dp), style = MaterialTheme.typography.bodySmall)
         }
     }
 }

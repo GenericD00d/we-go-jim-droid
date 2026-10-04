@@ -52,6 +52,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import com.wegojim.android.app
 import com.wegojim.android.data.ExerciseTrend
+import com.wegojim.android.data.GymEasterEgg
 import com.wegojim.android.data.SetEntry
 import com.wegojim.android.data.TrendMetric
 import kotlinx.coroutines.launch
@@ -81,6 +82,9 @@ fun ExercisesScreen(nav: NavHostController) {
     ) { padding ->
         LazyColumn(contentPadding = PaddingValues(top = padding.calculateTopPadding(), bottom = 88.dp)) {
             item { CatalogFilters(query, { query = it }, categories, category, { category = it }) }
+            if (filtered.isEmpty() && GymEasterEgg.searchMatches(query)) {
+                item { Text(GymEasterEgg.SEARCH_MESSAGE, Modifier.padding(16.dp), color = Wgj.colors.gold, fontWeight = FontWeight.Bold) }
+            }
             item {
                 Text(
                     "${filtered.size} exercises",

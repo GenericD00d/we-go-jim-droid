@@ -68,6 +68,7 @@ import com.wegojim.android.data.Repository
 import com.wegojim.android.data.SetEntry
 import com.wegojim.android.data.SettingsStore
 import com.wegojim.android.data.TemplateEntity
+import com.wegojim.android.data.TrainingGuidance
 import com.wegojim.android.data.WorkoutEditing
 import com.wegojim.android.data.newCardioBlock
 import com.wegojim.android.data.newExerciseEntry
@@ -256,6 +257,7 @@ fun TemplateEditorScreen(nav: NavHostController, templateId: String, folderId: S
 @Composable
 private fun TemplateExerciseCard(exercise: ExerciseEntry, supersetLabel: String?, all: List<ExerciseEntry>, vm: TemplateEditorViewModel) {
     var addingAlternative by remember { mutableStateOf(false) }
+    val guidanceEnabled = LocalContext.current.app.settings.state.collectAsStateWithLifecycle().value.trainingGuidance
     var replacing by remember { mutableStateOf(false) }
     var editingNotes by remember { mutableStateOf(false) }
     SectionCard {
@@ -276,6 +278,15 @@ private fun TemplateExerciseCard(exercise: ExerciseEntry, supersetLabel: String?
         }
         if (exercise.notes.isNotBlank()) {
             Text(exercise.notes, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        if (guidanceEnabled) {
+            val catalog by LocalContext.current.app.repository.exercise(exercise.exerciseUuid).collectAsStateWithLifecycle(null)
+            val rec = TrainingGuidance.recommendation(TrainingGuidance.classify(exercise, catalog))
+            Text(
+                "${rec.title}: ${rec.summary}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.secondary,
+            )
         }
         if (exercise.components.isNotEmpty()) {
             Row(verticalAlignment = Alignment.CenterVertically) {

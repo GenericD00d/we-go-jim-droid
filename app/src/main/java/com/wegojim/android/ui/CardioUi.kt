@@ -77,7 +77,7 @@ fun cardioResultSummary(c: CardioBlock): String = buildList {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun <T> Segmented(options: List<T>, selected: T, label: (T) -> String, onSelect: (T) -> Unit) {
+fun <T> Segmented(options: List<T>, selected: T?, label: (T) -> String, onSelect: (T) -> Unit) {
     SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
         options.forEachIndexed { i, option ->
             SegmentedButton(

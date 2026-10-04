@@ -31,6 +31,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -135,6 +136,34 @@ fun SettingsScreen(nav: NavHostController) {
                     SwitchRow("Keep screen awake during workouts", settings.keepScreenAwake) { v -> store.update { it.copy(keepScreenAwake = v) } }
                 }
             }
+            item { SectionHeader("Appearance") }
+            item {
+                SectionCard {
+                    AppTheme.entries.filter { it.isAvailable }.forEach { theme ->
+                        Row(
+                            Modifier.fillMaxWidth().clickableNoRipple { store.update { it.copy(appTheme = theme.name) } },
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            RadioButton(selected = AppTheme.of(settings.appTheme) == theme, onClick = { store.update { it.copy(appTheme = theme.name) } })
+                            Column(Modifier.weight(1f)) {
+                                Text(theme.title, fontWeight = FontWeight.SemiBold)
+                                Text(theme.subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    }
+                }
+            }
+            item {
+                SectionCard {
+                    SwitchRow("Training guidance while logging", settings.trainingGuidance) { v -> store.update { it.copy(trainingGuidance = v) } }
+                    SwitchRow("Gym bro mode", settings.gymBroMode) { v -> store.update { it.copy(gymBroMode = v) } }
+                    Text(
+                        "Guidance suggests warm-ups, rep targets and when to change the load. Gym bro mode adds more jokes when you finish.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
             item { SectionHeader("Calorie estimates") }
             item {
                 SectionCard {
@@ -145,7 +174,7 @@ fun SettingsScreen(nav: NavHostController) {
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     Text("Sex (for resting metabolic rate)", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Segmented(CalorieSex.entries, settings.sex ?: CalorieSex.entries.first(), { it.label }) { s -> store.update { it.copy(sex = s) } }
+                    Segmented(CalorieSex.entries, settings.sex, { it.label }) { s -> store.update { it.copy(sex = s) } }
                     OutlinedButton(onClick = { pickingBirthDate = true }, modifier = Modifier.fillMaxWidth()) {
                         Text(settings.birthDate?.let { "Born ${it.format(java.time.format.DateTimeFormatter.ofLocalizedDate(java.time.format.FormatStyle.MEDIUM))}" } ?: "Set birth date")
                     }

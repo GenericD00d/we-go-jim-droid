@@ -254,6 +254,7 @@ fun ProfileScreen(nav: NavHostController) {
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = padding.calculateTopPadding() + 4.dp, bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            item { ProfileHeader() }
             items(settings.dashboard, key = { it.id }) { widget ->
                 DashboardCard(widget, settings, workouts, facts, catalog, nav)
             }
