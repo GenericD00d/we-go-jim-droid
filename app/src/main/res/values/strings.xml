@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">We Go Jim</string>
+    <string name="widget_description">Workouts this week vs your weekly goal</string>
 </resources>

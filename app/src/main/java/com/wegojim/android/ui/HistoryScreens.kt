@@ -25,6 +25,9 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.graphics.rememberGraphicsLayer
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
@@ -174,6 +177,7 @@ fun WorkoutDetailScreen(nav: NavHostController, workoutId: String, isSummary: Bo
     var confirmDelete by remember { mutableStateOf(false) }
     var savingTemplate by remember { mutableStateOf(false) }
     var menu by remember { mutableStateOf(false) }
+    val cardLayer = rememberGraphicsLayer()
     val context = LocalContext.current
 
     Scaffold(
@@ -184,6 +188,10 @@ fun WorkoutDetailScreen(nav: NavHostController, workoutId: String, isSummary: Bo
                     if (!isSummary) IconButton(onClick = { nav.popBackStack() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") }
                 },
                 actions = {
+                    IconButton(onClick = {
+                        val w = workout ?: return@IconButton
+                        scope.launch { shareImage(context, w.name, cardLayer.toImageBitmap().asAndroidBitmap()) }
+                    }) { Icon(Icons.Default.Share, "Share workout card") }
                     Box {
                         IconButton(onClick = { menu = true }) { Icon(Icons.Default.MoreVert, "Workout actions") }
                         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
@@ -242,6 +250,7 @@ fun WorkoutDetailScreen(nav: NavHostController, workoutId: String, isSummary: Bo
                     }
                 }
             }
+            item { WorkoutShareCard(w, unit, cardLayer) }
             if (isSummary && w.prCount > 0) {
                 item {
                     SectionCard {

@@ -26,6 +26,7 @@ class ActiveWorkoutStore(
     private val repository: Repository,
     private val settings: SettingsStore,
     scope: CoroutineScope,
+    private val onFinished: (workoutId: String) -> Unit = {},
 ) : WorkoutEditor {
     private val file = File(context.filesDir, "active_workout.json")
     private val _state = MutableStateFlow(load())
@@ -68,6 +69,7 @@ class ActiveWorkoutStore(
         if (syncTemplate && workout.templateId != null) repository.applyWorkoutToTemplate(workout.templateId, workout)
         val id = repository.finishWorkout(workout)
         discard()
+        if (id != null) onFinished(id)
         return id
     }
 

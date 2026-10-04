@@ -142,6 +142,12 @@ interface ExerciseDao {
     @Upsert
     suspend fun upsert(items: List<ExerciseEntity>)
 
+    @Query("SELECT * FROM exercises WHERE isCustom = 1")
+    suspend fun customExercises(): List<ExerciseEntity>
+
+    @Query("DELETE FROM exercises WHERE isCustom = 1")
+    suspend fun deleteAllCustom()
+
     @Query("DELETE FROM exercises WHERE uuid = :uuid AND isCustom = 1")
     suspend fun deleteCustom(uuid: String)
 }
@@ -162,6 +168,18 @@ interface TemplateDao {
 
     @Query("SELECT COALESCE(MAX(sortOrder), 0) FROM templates")
     suspend fun maxSortOrder(): Int
+
+    @Query("SELECT * FROM templates")
+    suspend fun allNow(): List<TemplateEntity>
+
+    @Query("SELECT * FROM template_folders")
+    suspend fun foldersNow(): List<TemplateFolderEntity>
+
+    @Query("DELETE FROM templates")
+    suspend fun deleteAll()
+
+    @Query("DELETE FROM template_folders")
+    suspend fun deleteAllFolders()
 
     @Query("SELECT * FROM template_folders ORDER BY sortOrder, name COLLATE NOCASE")
     fun folders(): Flow<List<TemplateFolderEntity>>
@@ -186,6 +204,15 @@ interface WorkoutDao {
 
     @Query("SELECT * FROM workouts WHERE id = :id")
     fun byId(id: String): Flow<WorkoutEntity?>
+
+    @Query("SELECT * FROM workouts ORDER BY startedAt")
+    suspend fun allNow(): List<WorkoutEntity>
+
+    @Query("DELETE FROM workouts")
+    suspend fun deleteAll()
+
+    @Query("DELETE FROM set_facts")
+    suspend fun deleteAllFacts()
 
     @Upsert
     suspend fun upsert(workout: WorkoutEntity)

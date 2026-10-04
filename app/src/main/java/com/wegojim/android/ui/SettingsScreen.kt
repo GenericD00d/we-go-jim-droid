@@ -1,5 +1,8 @@
 package com.wegojim.android.ui
 
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -38,6 +41,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -46,6 +50,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
+import androidx.health.connect.client.PermissionController
+import com.wegojim.android.HealthConnectExport
 import com.wegojim.android.app
 import com.wegojim.android.data.CalorieSex
 import com.wegojim.android.data.DashboardWidget
@@ -55,6 +61,9 @@ import com.wegojim.android.data.PerformanceMath
 import com.wegojim.android.data.TrendMetric
 import com.wegojim.android.data.WidgetKind
 import com.wegojim.android.data.moved
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneOffset
@@ -66,6 +75,24 @@ fun SettingsScreen(nav: NavHostController) {
     val settings by app.settings.state.collectAsStateWithLifecycle()
     val store = app.settings
     var pickingBirthDate by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var pendingRestore by remember { mutableStateOf<android.net.Uri?>(null) }
+    val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
+        if (uri != null) scope.launch {
+            val ok = runCatching {
+                val text = app.repository.exportBackup()
+                withContext(Dispatchers.IO) { context.contentResolver.openOutputStream(uri)?.use { it.write(text.toByteArray()) } }
+            }.isSuccess
+            Toast.makeText(context, if (ok) "Backup saved" else "Couldn't save the backup", Toast.LENGTH_LONG).show()
+        }
+    }
+    val healthLauncher = rememberLauncherForActivityResult(PermissionController.createRequestPermissionResultContract()) { granted ->
+        val ok = granted.containsAll(HealthConnectExport.permissions)
+        store.update { it.copy(healthConnectExport = ok) }
+        if (!ok) Toast.makeText(context, "Health Connect permission wasn't granted", Toast.LENGTH_LONG).show()
+    }
+    val restoreLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> pendingRestore = uri }
 
     Scaffold(
         topBar = {
@@ -133,6 +160,38 @@ fun SettingsScreen(nav: NavHostController) {
                     }
                 }
             }
+            item { SectionHeader("Health Connect") }
+            item {
+                SectionCard {
+                    val available = remember { HealthConnectExport.isAvailable(context) }
+                    SwitchRow("Export finished workouts", settings.healthConnectExport && available) { on ->
+                        if (!on) store.update { it.copy(healthConnectExport = false) }
+                        else scope.launch {
+                            if (HealthConnectExport.hasPermissions(context)) store.update { it.copy(healthConnectExport = true) }
+                            else healthLauncher.launch(HealthConnectExport.permissions)
+                        }
+                    }
+                    Text(
+                        if (available) "Writes each finished workout (and estimated calories) to Health Connect. Nothing is read."
+                        else "Health Connect isn't available on this device.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            item { SectionHeader("Your data") }
+            item {
+                SectionCard {
+                    Text(
+                        "Everything is stored on this device and included in Android's device backup. " +
+                            "You can also save a backup file and restore it on another phone.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    OutlinedButton(onClick = { exportLauncher.launch("WeGoJim-backup-${LocalDate.now()}.json") }, Modifier.fillMaxWidth()) { Text("Save backup file") }
+                    OutlinedButton(onClick = { restoreLauncher.launch(arrayOf("application/json", "*/*")) }, Modifier.fillMaxWidth()) { Text("Restore from backup") }
+                }
+            }
             item { SectionHeader("About") }
             item {
                 SectionCard {
@@ -146,6 +205,30 @@ fun SettingsScreen(nav: NavHostController) {
                 }
             }
         }
+    }
+
+    pendingRestore?.let { uri ->
+        AlertDialog(
+            onDismissRequest = { pendingRestore = null },
+            title = { Text("Replace all data?") },
+            text = { Text("Restoring replaces your templates, folders, history and custom exercises with the backup's contents. Settings are kept.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    pendingRestore = null
+                    scope.launch {
+                        val message = runCatching {
+                            val text = withContext(Dispatchers.IO) {
+                                context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
+                            } ?: error("Couldn't read the file.")
+                            val backup = app.repository.restoreBackup(text)
+                            "Restored ${backup.workouts.size} workouts and ${backup.templates.size} templates"
+                        }.getOrElse { it.message ?: "Restore failed" }
+                        Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+                    }
+                }) { Text("Restore", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = { TextButton(onClick = { pendingRestore = null }) { Text("Cancel") } },
+        )
     }
 
     if (pickingBirthDate) {

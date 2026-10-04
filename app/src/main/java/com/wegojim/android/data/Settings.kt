@@ -22,6 +22,7 @@ data class UserSettings(
     val heightCm: Double? = null,
     val bodyWeightKg: Double? = null,
     val showCalories: Boolean = true,
+    val healthConnectExport: Boolean = false,
     val dashboard: List<DashboardWidget> = DashboardWidget.defaults,
 ) {
     val calorieProfile: CalorieProfile get() = CalorieProfile(sex, birthDate, heightCm, bodyWeightKg)
@@ -81,6 +82,7 @@ class SettingsStore(context: Context) {
             putString("heightCm", next.heightCm?.toString())
             putString("bodyWeightKg", next.bodyWeightKg?.toString())
             putBoolean("showCalories", next.showCalories)
+            putBoolean("healthConnectExport", next.healthConnectExport)
             putString("dashboard", AppJson.encodeToString(ListSerializer(DashboardWidget.serializer()), next.dashboard))
         }
         _state.value = next
@@ -99,6 +101,7 @@ class SettingsStore(context: Context) {
         heightCm = prefs.getString("heightCm", null)?.toDoubleOrNull(),
         bodyWeightKg = prefs.getString("bodyWeightKg", null)?.toDoubleOrNull(),
         showCalories = prefs.getBoolean("showCalories", true),
+        healthConnectExport = prefs.getBoolean("healthConnectExport", false),
         dashboard = prefs.getString("dashboard", null)?.let {
             runCatching { AppJson.decodeFromString(ListSerializer(DashboardWidget.serializer()), it) }.getOrNull()
         } ?: DashboardWidget.defaults,

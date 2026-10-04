@@ -1,5 +1,7 @@
 package com.wegojim.android.ui
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,12 +19,13 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.ViewList
+import androidx.compose.material.icons.automirrored.filled.ViewList
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
@@ -55,6 +58,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import com.wegojim.android.app
 import com.wegojim.android.data.TemplateEntity
+import com.wegojim.android.data.TemplateTransfer
 import com.wegojim.android.data.TemplateFolderEntity
 import kotlinx.coroutines.launch
 
@@ -67,6 +71,9 @@ fun StartScreen(nav: NavHostController) {
     val scope = rememberCoroutineScope()
     val templates by repo.templates.collectAsStateWithLifecycle(emptyList())
     val folders by repo.folders.collectAsStateWithLifecycle(emptyList())
+    val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) scope.launch { importTemplateUri(context, uri) }
+    }
     var collapsed by rememberSaveable { mutableStateOf(setOf<String>()) }
     var creatingFolder by remember { mutableStateOf(false) }
     var renamingFolder by remember { mutableStateOf<TemplateFolderEntity?>(null) }
@@ -113,6 +120,9 @@ fun StartScreen(nav: NavHostController) {
             }
             item {
                 SectionHeader("Templates") {
+                    IconButton(onClick = { importLauncher.launch(arrayOf("*/*")) }) {
+                        Icon(Icons.Default.FileDownload, "Import template")
+                    }
                     TextButton(onClick = { creatingFolder = true }) {
                         Icon(Icons.Default.CreateNewFolder, null); Text(" Folder")
                     }
@@ -124,7 +134,7 @@ fun StartScreen(nav: NavHostController) {
             if (templates.isEmpty()) {
                 item {
                     EmptyState(
-                        Icons.Default.ViewList,
+                        Icons.AutoMirrored.Filled.ViewList,
                         "No templates yet",
                         "Templates hold your planned exercises, sets, reps and rest times so you can start a session in one tap.",
                     )
@@ -145,6 +155,11 @@ fun StartScreen(nav: NavHostController) {
                             onNewTemplate = folder?.let { { nav.navigate(Routes.template("new", it.id)) } },
                             onRename = folder?.let { { renamingFolder = it } },
                             onDelete = folder?.let { { deletingFolder = it } },
+                            onShare = folder?.let { f ->
+                                {
+                                    shareTextFile(context, f.name, TemplateTransfer.EXTENSION, TemplateTransfer.exportFolder(f.name, list), "Share folder")
+                                }
+                            },
                         )
                     }
                 }
@@ -155,6 +170,9 @@ fun StartScreen(nav: NavHostController) {
                             onClick = { preview = template },
                             onEdit = { nav.navigate(Routes.template(template.id)) },
                             onDuplicate = { scope.launch { repo.duplicateTemplate(template.id) } },
+                            onShare = {
+                                shareTextFile(context, template.name, TemplateTransfer.EXTENSION, TemplateTransfer.exportTemplate(template), "Share template")
+                            },
                             onDelete = { deleting = template },
                         )
                     }
@@ -247,6 +265,7 @@ private fun TemplateCard(
     onClick: () -> Unit,
     onEdit: () -> Unit,
     onDuplicate: () -> Unit,
+    onShare: () -> Unit,
     onDelete: () -> Unit,
 ) {
     var menu by remember { mutableStateOf(false) }
@@ -270,6 +289,7 @@ private fun TemplateCard(
                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                     DropdownMenuItem(text = { Text("Edit") }, onClick = { menu = false; onEdit() })
                     DropdownMenuItem(text = { Text("Duplicate") }, onClick = { menu = false; onDuplicate() })
+                    DropdownMenuItem(text = { Text("Share") }, onClick = { menu = false; onShare() })
                     DropdownMenuItem(text = { Text("Delete", color = MaterialTheme.colorScheme.error) }, onClick = { menu = false; onDelete() })
                 }
             }
@@ -328,6 +348,7 @@ private fun FolderHeader(
     onNewTemplate: (() -> Unit)?,
     onRename: (() -> Unit)?,
     onDelete: (() -> Unit)?,
+    onShare: (() -> Unit)?,
 ) {
     var menu by remember { mutableStateOf(false) }
     Row(Modifier.fillMaxWidth().clickableNoRipple(onToggle), verticalAlignment = Alignment.CenterVertically) {
@@ -341,6 +362,7 @@ private fun FolderHeader(
                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                     onNewTemplate?.let { DropdownMenuItem(text = { Text("New template here") }, onClick = { menu = false; it() }) }
                     DropdownMenuItem(text = { Text("Rename") }, onClick = { menu = false; onRename() })
+                    onShare?.let { DropdownMenuItem(text = { Text("Share folder") }, onClick = { menu = false; it() }) }
                     onDelete?.let { DropdownMenuItem(text = { Text("Delete folder", color = MaterialTheme.colorScheme.error) }, onClick = { menu = false; it() }) }
                 }
             }

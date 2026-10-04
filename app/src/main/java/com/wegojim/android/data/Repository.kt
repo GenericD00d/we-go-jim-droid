@@ -163,6 +163,49 @@ class Repository(
             slot.id to options[lastIndex?.let { (it + 1) % options.size } ?: 0]
         }
 
+    /** Saves imported templates; a folder file becomes a new folder. Returns the number imported. */
+    suspend fun importTemplates(result: TemplateTransfer.ImportResult): Int {
+        val folderId = result.folderName?.let { createFolder(it) }
+        result.templates.forEach { saveTemplate(it.copy(folderId = folderId)) }
+        return result.templates.size
+    }
+
+    suspend fun exportBackup(): String = AppJson.encodeToString(BackupFile.serializer(), BackupFile(
+        folders = db.templates().foldersNow().map { FolderBackup(it.id, it.name, it.sortOrder) },
+        templates = db.templates().allNow().map { TemplateBackup(it.id, it.name, it.notes, it.folderId, it.sortOrder, it.exercises, it.cardio, it.updatedAt) },
+        workouts = db.workouts().allNow().map { WorkoutBackup(it.id, it.templateId, it.name, it.startedAt, it.endedAt, it.notes, it.exercises, it.cardio) },
+        customExercises = db.exercises().customExercises().map {
+            CustomExerciseBackup(it.uuid, it.name, it.category, it.equipment, it.primaryMuscles, it.secondaryMuscles, it.cardioProfile)
+        },
+    ))
+
+    /**
+     * Replaces all user data with a backup. Workouts are re-saved oldest first
+     * so PRs and set facts are recomputed consistently.
+     */
+    suspend fun restoreBackup(text: String): BackupFile {
+        val backup = runCatching { AppJson.decodeFromString(BackupFile.serializer(), text) }
+            .getOrElse { throw IllegalArgumentException("This file isn't a We Go Jim backup.") }
+        db.withTransaction {
+            db.workouts().deleteAllFacts()
+            db.workouts().deleteAll()
+            db.templates().deleteAll()
+            db.templates().deleteAllFolders()
+            db.exercises().deleteAllCustom()
+            db.exercises().upsert(backup.customExercises.map {
+                ExerciseEntity(it.uuid, it.name, it.category, it.equipment, "", it.primaryMuscles, it.secondaryMuscles, "", it.cardioProfile, true)
+            })
+            backup.folders.forEach { db.templates().upsertFolder(TemplateFolderEntity(it.id, it.name, it.sortOrder)) }
+            backup.templates.forEach {
+                db.templates().upsert(TemplateEntity(it.id, it.name, it.notes, it.folderId, it.sortOrder, it.exercises, it.updatedAt, it.cardio))
+            }
+            backup.workouts.sortedBy { it.startedAt }.forEach {
+                saveWorkout(it.id, it.templateId, it.name, it.notes, it.startedAt, it.endedAt, it.exercises, it.cardio)
+            }
+        }
+        return backup
+    }
+
     suspend fun lastSessionSets(exerciseUuid: String): List<SetFactEntity> = db.workouts().lastSessionSets(exerciseUuid)
 
     /**
