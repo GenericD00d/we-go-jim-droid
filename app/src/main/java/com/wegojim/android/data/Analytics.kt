@@ -87,7 +87,9 @@ object WorkoutCompare {
             MetricDelta("Volume", formatVolume(previous.totalVolumeKg), formatVolume(current.totalVolumeKg),
                 (if (volumeDelta > 0) "+" else if (volumeDelta < 0) "−" else "") + formatVolume(abs(volumeDelta)), Direction.of(current.totalVolumeKg, previous.totalVolumeKg)),
             MetricDelta("Duration", minutes(previous.durationSeconds), minutes(current.durationSeconds),
-                signed((current.durationSeconds - previous.durationSeconds) / 60) + "m", Direction.of(current.durationSeconds.toDouble(), previous.durationSeconds.toDouble())),
+                signed(current.durationSeconds / 60 - previous.durationSeconds / 60) + "m",
+                // Compare whole minutes so the colour matches the rounded label.
+                Direction.of((current.durationSeconds / 60).toDouble(), (previous.durationSeconds / 60).toDouble())),
             MetricDelta("PRs", "${previous.prCount}", "${current.prCount}", signed(current.prCount - previous.prCount), Direction.of(current.prCount.toDouble(), previous.prCount.toDouble())),
             MetricDelta("Working sets", "${working(previous)}", "${working(current)}", signed(working(current) - working(previous)), Direction.of(working(current).toDouble(), working(previous).toDouble())),
             MetricDelta("Exercises", "${previous.exercises.size}", "${current.exercises.size}", signed(current.exercises.size - previous.exercises.size), Direction.of(current.exercises.size.toDouble(), previous.exercises.size.toDouble())),
