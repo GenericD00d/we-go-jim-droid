@@ -51,7 +51,9 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import com.wegojim.android.app
+import com.wegojim.android.data.ExerciseTrend
 import com.wegojim.android.data.SetEntry
+import com.wegojim.android.data.TrendMetric
 import kotlinx.coroutines.launch
 
 private val customCategories = listOf("Arms", "Back", "Chest", "Core", "Legs", "Shoulders", "Conditioning", "Cardio")
@@ -165,6 +167,11 @@ fun ExerciseDetailScreen(nav: NavHostController, uuid: String) {
     val unit = app.settings.state.collectAsStateWithLifecycle().value.weightUnit
     val scope = rememberCoroutineScope()
     val sessions = remember(facts) { facts.groupBy { it.workoutId }.values.toList() }
+    var metric by rememberSaveable { mutableStateOf(TrendMetric.oneRepMax) }
+    val workouts by app.repository.workouts.collectAsStateWithLifecycle(emptyList())
+    val cardio = remember(workouts) {
+        workouts.flatMap { w -> w.cardio.filter { it.exerciseUuid == uuid }.map { w to it } }
+    }
     val working = remember(facts) { facts.filter { !it.isWarmup } }
 
     Scaffold(
@@ -199,7 +206,26 @@ fun ExerciseDetailScreen(nav: NavHostController, uuid: String) {
                     }
                 }
             }
+            if (cardio.isNotEmpty()) {
+                item { SectionHeader("Cardio history") }
+                items(cardio, key = { it.second.id }) { (w, block) ->
+                    SectionCard(onClick = { nav.navigate(Routes.workoutDetail(w.id)) }) {
+                        Text(formatDate(w.startedAt), fontWeight = FontWeight.SemiBold)
+                        Text(cardioResultSummary(block))
+                    }
+                }
+            }
             if (working.isNotEmpty()) {
+                item {
+                    SectionCard {
+                        val available = TrendMetric.entries.filter { m -> m != TrendMetric.oneRepMax && m != TrendMetric.maxWeight || working.any { it.weightKg != null } }
+                        Segmented(available, if (metric in available) metric else available.first(), { it.title.replace("Est. ", "") }) { metric = it }
+                        LineChart(
+                            ExerciseTrend.series(facts, if (metric in available) metric else available.first()),
+                            { formatTrend(if (metric in available) metric else available.first(), it, unit) },
+                        )
+                    }
+                }
                 item {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         StatTile("Est. 1RM", working.mapNotNull { it.e1rmKg }.maxOrNull()?.let { formatKg(it, unit) } ?: "–", Modifier.weight(1f))

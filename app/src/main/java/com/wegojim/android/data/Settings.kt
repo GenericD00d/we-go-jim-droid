@@ -5,6 +5,9 @@ import androidx.core.content.edit
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.builtins.ListSerializer
+import java.time.LocalDate
 
 data class UserSettings(
     val displayName: String = "",
@@ -14,7 +17,45 @@ data class UserSettings(
     val autoStartRestTimer: Boolean = true,
     val keepScreenAwake: Boolean = false,
     val distanceUnit: DistanceUnit = DistanceUnit.kilometers,
-)
+    val sex: CalorieSex? = null,
+    val birthDate: LocalDate? = null,
+    val heightCm: Double? = null,
+    val bodyWeightKg: Double? = null,
+    val showCalories: Boolean = true,
+    val dashboard: List<DashboardWidget> = DashboardWidget.defaults,
+) {
+    val calorieProfile: CalorieProfile get() = CalorieProfile(sex, birthDate, heightCm, bodyWeightKg)
+}
+
+@Serializable
+enum class WidgetKind(val title: String) {
+    weeklyGoal("Weekly Goal"),
+    coachBrief("Coach Brief"),
+    streaks("Streaks"),
+    prs("PRs"),
+    muscleHeatmap("Muscle Heatmap"),
+    consistencyCalendar("Consistency"),
+    topExercises("Top Exercises"),
+    exerciseTrend("Exercise Trend"),
+    calories("Calories"),
+}
+
+/** A configurable card on the profile dashboard (port of ProfileWidgetConfig). */
+@Serializable
+data class DashboardWidget(
+    val id: String = newId(),
+    val kind: WidgetKind,
+    val exerciseUuid: String? = null,
+    val exerciseName: String? = null,
+    val metric: TrendMetric = TrendMetric.oneRepMax,
+) {
+    companion object {
+        val defaults = listOf(
+            WidgetKind.weeklyGoal, WidgetKind.coachBrief, WidgetKind.streaks, WidgetKind.prs,
+            WidgetKind.muscleHeatmap, WidgetKind.consistencyCalendar, WidgetKind.topExercises,
+        ).map { DashboardWidget(id = it.name, kind = it) }
+    }
+}
 
 class SettingsStore(context: Context) {
     private val prefs = context.getSharedPreferences("wgj_settings", Context.MODE_PRIVATE)
@@ -35,6 +76,12 @@ class SettingsStore(context: Context) {
             putBoolean("autoStartRestTimer", next.autoStartRestTimer)
             putBoolean("keepScreenAwake", next.keepScreenAwake)
             putString("distanceUnit", next.distanceUnit.name)
+            putString("sex", next.sex?.name)
+            if (next.birthDate != null) putLong("birthDate", next.birthDate.toEpochDay()) else remove("birthDate")
+            putString("heightCm", next.heightCm?.toString())
+            putString("bodyWeightKg", next.bodyWeightKg?.toString())
+            putBoolean("showCalories", next.showCalories)
+            putString("dashboard", AppJson.encodeToString(ListSerializer(DashboardWidget.serializer()), next.dashboard))
         }
         _state.value = next
     }
@@ -47,6 +94,14 @@ class SettingsStore(context: Context) {
         autoStartRestTimer = prefs.getBoolean("autoStartRestTimer", true),
         keepScreenAwake = prefs.getBoolean("keepScreenAwake", false),
         distanceUnit = runCatching { DistanceUnit.valueOf(prefs.getString("distanceUnit", null)!!) }.getOrDefault(regionalDistanceUnit()),
+        sex = runCatching { CalorieSex.valueOf(prefs.getString("sex", null)!!) }.getOrNull(),
+        birthDate = if (prefs.contains("birthDate")) LocalDate.ofEpochDay(prefs.getLong("birthDate", 0)) else null,
+        heightCm = prefs.getString("heightCm", null)?.toDoubleOrNull(),
+        bodyWeightKg = prefs.getString("bodyWeightKg", null)?.toDoubleOrNull(),
+        showCalories = prefs.getBoolean("showCalories", true),
+        dashboard = prefs.getString("dashboard", null)?.let {
+            runCatching { AppJson.decodeFromString(ListSerializer(DashboardWidget.serializer()), it) }.getOrNull()
+        } ?: DashboardWidget.defaults,
     )
 }
 

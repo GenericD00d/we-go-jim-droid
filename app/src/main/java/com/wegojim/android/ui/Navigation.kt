@@ -59,6 +59,7 @@ object Routes {
     const val EDIT_WORKOUT = "editWorkout/{id}"
     const val WORKOUT_DETAIL = "workoutDetail/{id}?summary={summary}"
     const val EXERCISE_DETAIL = "exercise/{uuid}"
+    const val SETTINGS = "settings"
 
     fun template(id: String, folderId: String? = null) = "template/$id" + (folderId?.let { "?folder=$it" } ?: "")
     fun editWorkout(id: String) = "editWorkout/$id"
@@ -113,7 +114,8 @@ fun WgjRoot() {
             composable(Routes.HISTORY) { HistoryScreen(nav) }
             composable(Routes.PROGRESS) { ProgressScreen(nav) }
             composable(Routes.EXERCISES) { ExercisesScreen(nav) }
-            composable(Routes.PROFILE) { ProfileScreen() }
+            composable(Routes.PROFILE) { ProfileScreen(nav) }
+            composable(Routes.SETTINGS) { SettingsScreen(nav) }
             composable(Routes.WORKOUT) { ActiveWorkoutScreen(nav) }
             composable(
                 Routes.TEMPLATE,

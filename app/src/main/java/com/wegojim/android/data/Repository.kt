@@ -41,6 +41,7 @@ class Repository(
     val folders: Flow<List<TemplateFolderEntity>> = db.templates().folders()
     val workouts: Flow<List<WorkoutEntity>> = db.workouts().all()
     val exerciseBests: Flow<List<ExerciseBest>> = db.workouts().exerciseBests()
+    val facts: Flow<List<SetFactEntity>> = db.workouts().allFacts()
 
     fun exercise(uuid: String) = db.exercises().byUuid(uuid)
     fun workout(id: String) = db.workouts().byId(id)

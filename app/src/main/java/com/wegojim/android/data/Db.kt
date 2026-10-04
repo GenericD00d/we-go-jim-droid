@@ -210,6 +210,9 @@ interface WorkoutDao {
     )
     suspend fun lastSessionSets(exerciseUuid: String): List<SetFactEntity>
 
+    @Query("SELECT * FROM set_facts ORDER BY completedAt")
+    fun allFacts(): Flow<List<SetFactEntity>>
+
     @Query("SELECT MAX(completedAt) FROM set_facts WHERE exerciseUuid = :exerciseUuid")
     suspend fun lastCompletedAt(exerciseUuid: String): Long?
 

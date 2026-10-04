@@ -2,6 +2,9 @@ package com.wegojim.android.ui
 
 import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -14,6 +17,10 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.History
@@ -26,6 +33,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -35,19 +43,30 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import com.wegojim.android.app
+import com.wegojim.android.data.CalorieEstimator
 import com.wegojim.android.data.LoadUnit
+import com.wegojim.android.data.MuscleHeatmap
 import com.wegojim.android.data.SetEntry
 import com.wegojim.android.data.WorkoutEntity
 import kotlinx.coroutines.launch
+import java.time.LocalDate
+import java.time.YearMonth
+import java.time.format.DateTimeFormatter
+import java.time.format.TextStyle
+import java.time.temporal.WeekFields
+import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -55,13 +74,46 @@ fun HistoryScreen(nav: NavHostController) {
     val app = LocalContext.current.app
     val workouts by app.repository.workouts.collectAsStateWithLifecycle(null)
     val unit = app.settings.state.collectAsStateWithLifecycle().value.weightUnit
-    val byMonth = remember(workouts) { workouts.orEmpty().groupBy { formatMonth(it.startedAt) } }
+    var calendar by rememberSaveable { mutableStateOf(false) }
+    var month by rememberSaveable { mutableStateOf(YearMonth.now().toString()) }
+    var day by rememberSaveable { mutableStateOf<String?>(null) }
+    val shown = remember(workouts, calendar, month, day) {
+        val all = workouts.orEmpty()
+        when {
+            !calendar -> all
+            day != null -> all.filter { it.startedAt.toLocalDate().toString() == day }
+            else -> all.filter { YearMonth.from(it.startedAt.toLocalDate()).toString() == month }
+        }
+    }
+    val byMonth = remember(shown) { shown.groupBy { formatMonth(it.startedAt) } }
 
-    Scaffold(topBar = { TopAppBar(title = { Text("History", fontWeight = FontWeight.Bold) }) }) { padding ->
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("History", fontWeight = FontWeight.Bold) },
+                actions = {
+                    IconButton(onClick = { calendar = !calendar; day = null }) {
+                        Icon(if (calendar) Icons.AutoMirrored.Filled.List else Icons.Default.CalendarMonth, if (calendar) "List view" else "Calendar view")
+                    }
+                },
+            )
+        },
+    ) { padding ->
         LazyColumn(
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = padding.calculateTopPadding() + 4.dp, bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            if (calendar) {
+                item {
+                    MonthCalendar(
+                        month = YearMonth.parse(month),
+                        workoutDays = remember(workouts) { workouts.orEmpty().map { it.startedAt.toLocalDate() }.toSet() },
+                        selected = day?.let { LocalDate.parse(it) },
+                        onMonth = { month = it.toString(); day = null },
+                        onDay = { d -> day = if (day == d.toString()) null else d.toString() },
+                    )
+                }
+            }
             if (workouts?.isEmpty() == true) {
                 item { EmptyState(Icons.Default.History, "No workouts yet", "Finished workouts show up here with their sets, volume and PRs.") }
             }
@@ -175,6 +227,21 @@ fun WorkoutDetailScreen(nav: NavHostController, workoutId: String, isSummary: Bo
                     StatTile("PRs", w.prCount.toString(), Modifier.weight(1f))
                 }
             }
+            item {
+                val settings = app.settings.state.collectAsStateWithLifecycle().value
+                val exercisesCatalog by app.repository.exercises.collectAsStateWithLifecycle(emptyList())
+                val heat = remember(w, exercisesCatalog) { MuscleHeatmap.build(listOf(w), exercisesCatalog.associateBy { it.uuid }) }
+                val kcal = if (settings.showCalories) CalorieEstimator.estimate(w, settings.calorieProfile) else null
+                if (heat.isNotEmpty() || kcal != null) {
+                    SectionCard {
+                        if (kcal != null) Text("≈ $kcal active kcal (estimate)", fontWeight = FontWeight.SemiBold)
+                        if (heat.isNotEmpty()) {
+                            Text("Muscles worked", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            MuscleHeatmapGrid(heat)
+                        }
+                    }
+                }
+            }
             if (isSummary && w.prCount > 0) {
                 item {
                     SectionCard {
@@ -258,5 +325,79 @@ fun WorkoutDetailScreen(nav: NavHostController, workoutId: String, isSummary: Bo
             },
             dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Cancel") } },
         )
+    }
+}
+
+@Composable
+private fun MonthCalendar(
+    month: YearMonth,
+    workoutDays: Set<LocalDate>,
+    selected: LocalDate?,
+    onMonth: (YearMonth) -> Unit,
+    onDay: (LocalDate) -> Unit,
+) {
+    val firstDay = WeekFields.of(Locale.getDefault()).firstDayOfWeek
+    val leading = (month.atDay(1).dayOfWeek.value - firstDay.value + 7) % 7
+    val cells = List(leading) { null } + (1..month.lengthOfMonth()).map { month.atDay(it) }
+    val today = LocalDate.now()
+    SectionCard {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = { onMonth(month.minusMonths(1)) }) { Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, "Previous month") }
+            Text(
+                month.format(DateTimeFormatter.ofPattern("MMMM yyyy")),
+                Modifier.weight(1f),
+                textAlign = TextAlign.Center,
+                fontWeight = FontWeight.SemiBold,
+            )
+            IconButton(onClick = { onMonth(month.plusMonths(1)) }, enabled = month < YearMonth.now()) {
+                Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, "Next month")
+            }
+        }
+        Row {
+            (0 until 7).forEach { i ->
+                Text(
+                    firstDay.plus(i.toLong()).getDisplayName(TextStyle.NARROW, Locale.getDefault()),
+                    Modifier.weight(1f),
+                    textAlign = TextAlign.Center,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        cells.chunked(7).forEach { week ->
+            Row {
+                week.forEach { date ->
+                    Box(Modifier.weight(1f).aspectRatio(1f).padding(2.dp), contentAlignment = Alignment.Center) {
+                        if (date != null) {
+                            val trained = date in workoutDays
+                            Surface(
+                                onClick = { onDay(date) },
+                                enabled = trained,
+                                shape = CircleShape,
+                                color = when {
+                                    date == selected -> MaterialTheme.colorScheme.primary
+                                    trained -> MaterialTheme.colorScheme.primaryContainer
+                                    else -> Color.Transparent
+                                },
+                                modifier = Modifier.fillMaxSize(),
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Text(
+                                        "${date.dayOfMonth}",
+                                        color = when {
+                                            date == selected -> MaterialTheme.colorScheme.onPrimary
+                                            trained -> MaterialTheme.colorScheme.onPrimaryContainer
+                                            else -> MaterialTheme.colorScheme.onSurfaceVariant
+                                        },
+                                        fontWeight = if (date == today || trained) FontWeight.Bold else FontWeight.Normal,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+                repeat(7 - week.size) { Spacer(Modifier.weight(1f)) }
+            }
+        }
     }
 }
