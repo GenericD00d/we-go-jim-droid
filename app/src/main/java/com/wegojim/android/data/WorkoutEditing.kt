@@ -248,3 +248,73 @@ data class TemplateSyncPreview(
         }
     }
 }
+
+/** A set is done once it and all of its drop stages are checked off. */
+val SetEntry.isCycleCompleted: Boolean get() = completed && dropStages.all { it.completed }
+
+/**
+ * Port of WorkoutSupersetProgression: which superset set comes next, and how
+ * long to rest after one. Derived from the logged sets alone, so resuming,
+ * unchecking and plan edits need no separate cursor.
+ */
+object SupersetProgression {
+    data class Step(
+        val exerciseId: String,
+        val setId: String,
+        val position: String,
+        val setLabel: String,
+        val round: Int?,
+        val nextDrop: Int?,
+    ) {
+        val label: String get() = "$position · $setLabel" + (nextDrop?.let { " · Drop $it" } ?: "")
+    }
+
+    /** "Warm-up" or "Set N", counting working sets only. */
+    fun setLabel(exercise: ExerciseEntry, index: Int): String {
+        val set = exercise.sets[index]
+        return if (set.isWarmup) "Warm-up" else "Set ${exercise.sets.take(index + 1).count { !it.isWarmup }}"
+    }
+
+    /** The two members of the superset [exercise] belongs to, in order, or null when it isn't in one. */
+    fun pair(exercise: ExerciseEntry, all: List<ExerciseEntry>): Pair<ExerciseEntry, ExerciseEntry>? {
+        val group = exercise.supersetGroupId ?: return null
+        val members = all.filter { it.supersetGroupId == group }
+        return if (members.size == 2) members[0] to members[1] else null
+    }
+
+    fun nextStep(first: ExerciseEntry, second: ExerciseEntry, labels: Map<String, String>): Step? {
+        val members = listOf(first, second)
+        // Pair warm-ups separately so they alternate without shifting working rounds.
+        for (warmup in listOf(true, false)) {
+            val rounds = members.map { m -> m.sets.indices.filter { m.sets[it].isWarmup == warmup } }
+            for (round in 0 until maxOf(rounds[0].size, rounds[1].size)) {
+                members.forEachIndexed { i, member ->
+                    val index = rounds[i].getOrNull(round) ?: return@forEachIndexed
+                    val set = member.sets[index]
+                    if (!set.isCycleCompleted) {
+                        return Step(
+                            exerciseId = member.id,
+                            setId = set.id,
+                            position = labels[member.id] ?: if (i == 0) "A1" else "A2",
+                            setLabel = setLabel(member, index),
+                            round = if (warmup) null else round + 1,
+                            nextDrop = if (set.completed) set.dropStages.indexOfFirst { !it.completed }.takeIf { it >= 0 }?.plus(1) else null,
+                        )
+                    }
+                }
+            }
+        }
+        return null
+    }
+
+    /** Round rest once both halves of a round are done; unequal set counts continue as solo rounds. */
+    fun restSeconds(afterSetId: String, exerciseId: String, first: ExerciseEntry, second: ExerciseEntry, roundRestSeconds: Int): Int {
+        val own = if (exerciseId == first.id) first else if (exerciseId == second.id) second else return 0
+        val paired = if (own === first) second else first
+        val index = own.sets.indexOfFirst { it.id == afterSetId }
+        val set = own.sets.getOrNull(index)?.takeIf { it.isCycleCompleted } ?: return 0
+        val round = own.sets.indices.filter { own.sets[it].isWarmup == set.isWarmup }.indexOf(index)
+        val partner = paired.sets.filter { it.isWarmup == set.isWarmup }.getOrNull(round)
+        return if (partner == null || partner.isCycleCompleted) roundRestSeconds else 0
+    }
+}

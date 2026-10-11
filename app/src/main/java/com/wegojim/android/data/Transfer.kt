@@ -240,6 +240,8 @@ data class BackupFile(
     val templates: List<TemplateBackup> = emptyList(),
     val workouts: List<WorkoutBackup> = emptyList(),
     val customExercises: List<CustomExerciseBackup> = emptyList(),
+    /** Completed outdoor routes, keyed by their cardio block id. Older backups have none. */
+    val cardioRoutes: List<CardioRoute> = emptyList(),
 )
 
 @Serializable

@@ -27,6 +27,8 @@ data class UserSettings(
     val athleteType: String? = null,
     val trainingGuidance: Boolean = true,
     val gymBroMode: Boolean = false,
+    /** Ongoing workout notification (the Live Activity counterpart). Off by default. */
+    val liveNotification: Boolean = false,
     /** Bumped when the avatar file changes so the UI reloads it. */
     val avatarVersion: Long = 0,
     val dashboard: List<DashboardWidget> = DashboardWidget.defaults,
@@ -73,6 +75,25 @@ class SettingsStore(context: Context) {
         get() = prefs.getInt("seedVersion", 0)
         set(value) = prefs.edit { putInt("seedVersion", value) }
 
+    /**
+     * Port of JourneyCelebrationPreferences: remembers which Journey milestones
+     * already appeared and returns how many are new enough to celebrate. On
+     * first use, old history is backfilled quietly; later imports or edits
+     * never shower old badges either.
+     */
+    @Synchronized
+    fun claimCelebrations(events: List<JourneyMilestone>, now: Long = System.currentTimeMillis()): Int {
+        val saved = prefs.getStringSet("journeyCelebrated", null)
+        val seen = saved.orEmpty()
+        val combined = seen + events.map { it.id }
+        if (saved == null || combined != seen) prefs.edit { putStringSet("journeyCelebrated", combined) }
+        val window = if (saved == null) 24 * 3_600_000L else 7 * 24 * 3_600_000L
+        return events.count {
+            val earned = it.unlockedAt ?: it.date
+            it.id !in seen && earned <= now && now - earned <= window
+        }
+    }
+
     fun update(transform: (UserSettings) -> UserSettings) {
         val next = transform(_state.value)
         prefs.edit {
@@ -93,6 +114,7 @@ class SettingsStore(context: Context) {
             putString("athleteType", next.athleteType)
             putBoolean("trainingGuidance", next.trainingGuidance)
             putBoolean("gymBroMode", next.gymBroMode)
+            putBoolean("liveNotification", next.liveNotification)
             putLong("avatarVersion", next.avatarVersion)
             putString("dashboard", AppJson.encodeToString(ListSerializer(DashboardWidget.serializer()), next.dashboard))
         }
@@ -117,6 +139,7 @@ class SettingsStore(context: Context) {
         athleteType = prefs.getString("athleteType", null),
         trainingGuidance = prefs.getBoolean("trainingGuidance", true),
         gymBroMode = prefs.getBoolean("gymBroMode", false),
+        liveNotification = prefs.getBoolean("liveNotification", false),
         avatarVersion = prefs.getLong("avatarVersion", 0),
         dashboard = prefs.getString("dashboard", null)?.let {
             runCatching { AppJson.decodeFromString(ListSerializer(DashboardWidget.serializer()), it) }.getOrNull()

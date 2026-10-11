@@ -77,6 +77,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
+/** New template plans surround the strength work; an existing main activity stays editable (TemplateCardioPlanningPolicy). */
+val TEMPLATE_CARDIO_ROLES = listOf(CardioRole.warmUp, CardioRole.finisher)
+
 class TemplateEditorViewModel(
     private val repo: Repository,
     private val settings: SettingsStore,
@@ -238,7 +241,7 @@ fun TemplateEditorScreen(nav: NavHostController, templateId: String, folderId: S
         })
     }
     cardioSetup?.let { block ->
-        CardioSetupDialog(block, onDismiss = { cardioSetup = null }, onSave = { c ->
+        CardioSetupDialog(block, onDismiss = { cardioSetup = null }, roles = TEMPLATE_CARDIO_ROLES, onSave = { c ->
             vm.update { it.copy(cardio = it.cardio + c) }
             cardioSetup = null
         })
@@ -326,7 +329,6 @@ private fun TemplateExerciseCard(exercise: ExerciseEntry, supersetLabel: String?
                     onToggleWarmup = { vm.updateSet(exercise.id, set.id) { it.copy(isWarmup = !it.isWarmup, dropStages = emptyList()) } },
                     onUnit = { unit -> vm.updateSet(exercise.id, set.id) { it.copy(unit = unit) } },
                     onDelete = { vm.exercises { WorkoutEditing.removeSet(it, exercise.id, set.id) } },
-                    onAddDrop = if (set.isWarmup) null else ({ vm.exercises { WorkoutEditing.addDrop(it, exercise.id, set.id) } }),
                 )
                 NumberField(
                     set.targetWeight,
@@ -334,6 +336,7 @@ private fun TemplateExerciseCard(exercise: ExerciseEntry, supersetLabel: String?
                     Modifier.weight(1f),
                     placeholder = if (set.unit == LoadUnit.bodyweight) "+0" else "Weight",
                     suffix = set.unit.label,
+                    max = MAX_WEIGHT,
                 )
                 NumberField(
                     set.targetReps?.toDouble(),
@@ -341,16 +344,33 @@ private fun TemplateExerciseCard(exercise: ExerciseEntry, supersetLabel: String?
                     Modifier.weight(0.8f),
                     placeholder = "Reps",
                     integer = true,
+                    max = MAX_REPS,
                 )
             }
-            set.dropStages.forEach { drop ->
+            if (set.dropStages.isNotEmpty()) {
+                Text("Dropset", Modifier.padding(start = 12.dp), style = MaterialTheme.typography.labelMedium, color = Wgj.colors.cyan, fontWeight = FontWeight.Bold)
+            }
+            set.dropStages.forEachIndexed { index, drop ->
+                var menu by remember { mutableStateOf(false) }
                 Row(Modifier.padding(start = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.SubdirectoryArrowRight, "Drop stage", Modifier.size(20.dp), tint = Wgj.colors.warning)
-                    NumberField(drop.targetWeight, { v -> vm.updateDrop(exercise.id, set.id, drop.id) { it.copy(targetWeight = v) } }, Modifier.weight(1f), "Weight", suffix = drop.unit.label)
-                    NumberField(drop.targetReps?.toDouble(), { v -> vm.updateDrop(exercise.id, set.id, drop.id) { it.copy(targetReps = v?.toInt()) } }, Modifier.weight(0.8f), "Reps", integer = true)
-                    IconButton(onClick = { vm.exercises { WorkoutEditing.removeDrop(it, exercise.id, set.id, drop.id) } }, Modifier.size(32.dp)) {
-                        Icon(Icons.Default.Close, "Remove drop stage", Modifier.size(18.dp))
+                    Icon(Icons.Default.SubdirectoryArrowRight, "Drop ${index + 1}", Modifier.size(20.dp), tint = Wgj.colors.warning)
+                    NumberField(drop.targetWeight, { v -> vm.updateDrop(exercise.id, set.id, drop.id) { it.copy(targetWeight = v) } }, Modifier.weight(1f), "Weight", suffix = drop.unit.label, max = MAX_WEIGHT)
+                    NumberField(drop.targetReps?.toDouble(), { v -> vm.updateDrop(exercise.id, set.id, drop.id) { it.copy(targetReps = v?.toInt()) } }, Modifier.weight(0.8f), "Reps", integer = true, max = MAX_REPS)
+                    Box {
+                        IconButton(onClick = { menu = true }, Modifier.size(32.dp)) { Icon(Icons.Default.MoreVert, "Drop ${index + 1} options", Modifier.size(18.dp)) }
+                        DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                            DropdownMenuItem(
+                                text = { Text("Delete drop", color = MaterialTheme.colorScheme.error) },
+                                onClick = { menu = false; vm.exercises { WorkoutEditing.removeDrop(it, exercise.id, set.id, drop.id) } },
+                            )
+                        }
                     }
+                }
+            }
+            if (!set.isWarmup) {
+                TextButton(onClick = { vm.exercises { WorkoutEditing.addDrop(it, exercise.id, set.id) } }, Modifier.padding(start = 4.dp)) {
+                    Icon(Icons.Default.Add, null, Modifier.size(18.dp))
+                    Text(if (set.dropStages.isEmpty()) " Make dropset" else " Add drop", style = MaterialTheme.typography.labelLarge)
                 }
             }
         }

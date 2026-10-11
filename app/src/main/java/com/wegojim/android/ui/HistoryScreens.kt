@@ -60,6 +60,10 @@ import androidx.navigation.NavHostController
 import com.wegojim.android.app
 import com.wegojim.android.data.Birthday
 import com.wegojim.android.data.CalorieEstimator
+import com.wegojim.android.data.CardioRecords
+import com.wegojim.android.data.CardioSummary
+import com.wegojim.android.data.PerformanceMath
+import com.wegojim.android.data.PersonalRecord
 import com.wegojim.android.data.GymEasterEgg
 import com.wegojim.android.data.LoadUnit
 import com.wegojim.android.data.MuscleHeatmap
@@ -241,15 +245,19 @@ fun WorkoutDetailScreen(nav: NavHostController, workoutId: String, isSummary: Bo
                     )
                 }
             }
+            // Cardio-only sessions skip the strength tiles (sets, volume, muscles) that would all read zero.
+            val cardioOnly = w.exercises.isEmpty() && w.cardio.isNotEmpty()
             item {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     StatTile("Duration", formatDuration(w.durationSeconds), Modifier.weight(1f))
-                    StatTile(if (w.exercises.isEmpty()) "Cardio" else "Sets", if (w.exercises.isEmpty()) formatDuration(w.cardioSeconds) else w.completedSetCount.toString(), Modifier.weight(1f))
+                    StatTile(if (cardioOnly) "Cardio" else "Sets", if (cardioOnly) formatDuration(w.cardioSeconds) else w.completedSetCount.toString(), Modifier.weight(1f))
                 }
-                Spacer(Modifier.padding(4.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    StatTile("Volume", formatVolume(w.totalVolumeKg, unit), Modifier.weight(1f))
-                    StatTile("PRs", w.prCount.toString(), Modifier.weight(1f))
+                if (!cardioOnly) {
+                    Spacer(Modifier.padding(4.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        StatTile("Volume", formatVolume(w.totalVolumeKg, unit), Modifier.weight(1f))
+                        StatTile("PRs", w.prCount.toString(), Modifier.weight(1f))
+                    }
                 }
             }
             item {
@@ -268,24 +276,41 @@ fun WorkoutDetailScreen(nav: NavHostController, workoutId: String, isSummary: Bo
                 }
             }
             item { WorkoutShareCard(w, unit, cardLayer) }
-            if (isSummary && w.prCount > 0) {
-                item {
-                    SectionCard {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.EmojiEvents, null, tint = Wgj.colors.gold)
-                            Spacer(Modifier.width(8.dp))
-                            Text(
-                                "New estimated 1RM on " + w.exercises.filter { e -> e.sets.any { it.isPr } }.joinToString { it.name },
-                                fontWeight = FontWeight.SemiBold,
-                            )
-                        }
+            val achievedAt = "${formatDate(w.endedAt)} ${formatTime(w.endedAt)}"
+            val strengthRecords = w.exercises.flatMap { e ->
+                e.sets.filter { it.isPr }.map { set ->
+                    val e1rm = set.weight?.let { PerformanceMath.estimatedOneRepMax(PerformanceMath.toKg(it, set.unit), set.reps ?: 0) }
+                    PersonalRecord("pr-${set.id}", e.name, formatSet(set), e1rm?.let { "New estimated 1RM: ${formatKg(it, unit)}" } ?: "New estimated 1RM")
+                }
+            }
+            if (strengthRecords.isNotEmpty()) {
+                item { SectionHeader("Personal records") }
+                items(strengthRecords, key = { it.id }) { record -> RecordCard(record, achievedAt) }
+            }
+            item(key = "cardio-prs") {
+                val all by app.repository.workouts.collectAsStateWithLifecycle(emptyList())
+                val distanceUnit = app.settings.state.collectAsStateWithLifecycle().value.distanceUnit
+                val records = remember(all, w, distanceUnit) { CardioRecords.forWorkout(w.id, all, distanceUnit) }
+                if (records.isNotEmpty()) {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        SectionHeader("Cardio PRs")
+                        Text("Distance and average-speed records from this workout.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        records.forEach { RecordCard(it, achievedAt) }
                     }
                 }
             }
+            if (cardioOnly) item { SectionHeader("Your saved time, distance and pace") }
             items(w.cardio, key = { it.id }) { block ->
                 SectionCard(onClick = { nav.navigate(Routes.exercise(block.exerciseUuid)) }) {
                     Text(block.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = Wgj.colors.cyan)
-                    Text("${block.role.label} · ${cardioResultSummary(block)}")
+                    if (!cardioOnly) Text(block.role.label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    val metrics = CardioSummary.metrics(block)
+                    if (metrics.isEmpty()) Text("Not logged", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    metrics.chunked(3).forEach { row ->
+                        Row(Modifier.fillMaxWidth()) { row.forEach { Box(Modifier.weight(1f)) { Labeled(it.title, it.value) } }; repeat(3 - row.size) { Spacer(Modifier.weight(1f)) } }
+                    }
+                    if (block.notes.isNotBlank()) Text(block.notes, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    SavedRoute(w.id, block.id)
                 }
             }
             items(w.exercises, key = { it.id }) { exercise ->
@@ -357,6 +382,22 @@ fun WorkoutDetailScreen(nav: NavHostController, workoutId: String, isSummary: Bo
             },
             dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Cancel") } },
         )
+    }
+}
+
+/** One PR with its share button (port of WorkoutCompletionPersonalRecordCard). */
+@Composable
+private fun RecordCard(record: PersonalRecord, achievedAt: String) {
+    SectionCard {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Default.EmojiEvents, null, tint = Wgj.colors.gold)
+            Column(Modifier.weight(1f).padding(start = 10.dp)) {
+                Text(record.exerciseName, fontWeight = FontWeight.SemiBold)
+                Text(record.performanceText, color = Wgj.colors.gold, fontWeight = FontWeight.SemiBold)
+                Text(record.detailText, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        PrShareButton(record, achievedAt)
     }
 }
 

@@ -108,6 +108,7 @@ fun ProgressScreen(nav: NavHostController) {
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = padding.calculateTopPadding() + 4.dp, bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            item { JourneyEntryCard { nav.navigate(Routes.JOURNEY) } }
             item { Segmented(listOf(0, 1), tab, { if (it == 0) "Compare" else "Exercises" }) { tab = it } }
             if (tab == 0) {
                 val a = workouts.firstOrNull { it.id == previousId }

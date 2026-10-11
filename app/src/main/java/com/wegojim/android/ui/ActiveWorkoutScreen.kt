@@ -6,6 +6,9 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -28,6 +31,8 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.EmojiEvents
+import androidx.compose.material.icons.filled.ArrowCircleDown
+import androidx.compose.material.icons.filled.ArrowCircleRight
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.MoreVert
@@ -57,6 +62,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -81,6 +87,8 @@ import com.wegojim.android.app
 import com.wegojim.android.data.ActiveWorkout
 import com.wegojim.android.data.ActiveWorkoutStore
 import com.wegojim.android.data.CardioBlock
+import com.wegojim.android.data.CardioGoal
+import com.wegojim.android.data.CardioRecording
 import com.wegojim.android.data.CardioPhase
 import com.wegojim.android.data.CardioRole
 import com.wegojim.android.data.DropStage
@@ -88,6 +96,7 @@ import com.wegojim.android.data.ExerciseEntry
 import com.wegojim.android.data.LoadUnit
 import com.wegojim.android.data.SetEntry
 import com.wegojim.android.data.SetFactEntity
+import com.wegojim.android.data.SupersetProgression
 import com.wegojim.android.data.TemplateSyncPreview
 import com.wegojim.android.data.TrainingGuidance
 import com.wegojim.android.data.WorkoutEditing
@@ -133,7 +142,32 @@ fun ActiveWorkoutScreen(nav: NavHostController) {
         if (Build.VERSION.SDK_INT >= 33) notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
     }
 
+    // A session that is just one walk, run or ride is the recording screen itself.
+    CardioRecording.standaloneActivity(w)?.let { activity ->
+        CardioRecordingScreen(
+            nav,
+            activity.id,
+            embedded = true,
+            onCancelWorkout = { store.discard() },
+            onSaveWorkout = {
+                scope.launch {
+                    val id = store.finish()
+                    if (id != null) nav.navigate(Routes.workoutDetail(id, summary = true)) { popUpTo(Routes.START) }
+                }
+            },
+        )
+        return
+    }
+
     val elapsed = rememberElapsedSeconds(w.startedAt)
+    val scrollTarget = remember { mutableStateOf<String?>(null) }
+
+    fun finishNow(syncTemplate: Boolean) {
+        scope.launch {
+            val id = store.finish(syncTemplate)
+            if (id != null) nav.navigate(Routes.workoutDetail(id, summary = true)) { popUpTo(Routes.START) }
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -147,7 +181,9 @@ fun ActiveWorkoutScreen(nav: NavHostController) {
                 },
                 actions = {
                     Button(onClick = {
-                        scope.launch {
+                        // Cardio-only sessions have nothing left to confirm once their results are in.
+                        if (w.exercises.isEmpty() && w.cardio.isNotEmpty() && w.cardio.all { it.completed }) finishNow(false)
+                        else scope.launch {
                             syncPreview = store.templateSyncPreview()
                             confirmFinish = true
                         }
@@ -174,7 +210,7 @@ fun ActiveWorkoutScreen(nav: NavHostController) {
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             item { WorkoutProgressHeader(w) }
-            workoutEditorItems(w, store)
+            workoutEditorItems(w, store, onOpenCardio = { nav.navigate(Routes.cardio(it)) }, scrollTarget = scrollTarget)
             item {
                 TextButton(onClick = { confirmCancel = true }, Modifier.fillMaxWidth()) {
                     Text("Cancel Workout", color = MaterialTheme.colorScheme.error)
@@ -207,12 +243,7 @@ fun ActiveWorkoutScreen(nav: NavHostController) {
             onDismiss = { confirmFinish = false },
             onFinish = { syncTemplate ->
                 confirmFinish = false
-                scope.launch {
-                    val id = store.finish(syncTemplate)
-                    if (id != null) {
-                        nav.navigate(Routes.workoutDetail(id, summary = true)) { popUpTo(Routes.START) }
-                    }
-                }
+                finishNow(syncTemplate)
             },
         )
     }
@@ -283,23 +314,34 @@ fun NameDialog(title: String, initial: String, confirm: String = "Save", onDismi
  * The exercise, superset and cardio cards plus add buttons, shared by the
  * live workout and completed-workout editing.
  */
-fun LazyListScope.workoutEditorItems(w: ActiveWorkout, editor: WorkoutEditor) {
+fun LazyListScope.workoutEditorItems(
+    w: ActiveWorkout,
+    editor: WorkoutEditor,
+    onOpenCardio: ((String) -> Unit)? = null,
+    scrollTarget: MutableState<String?>? = null,
+) {
     val labels = WorkoutEditing.supersetLabels(w.exercises)
     val blocks = WorkoutEditing.blocks(w.exercises)
-    items(w.cardio.filter { it.phase == CardioPhase.preWorkout }, key = { it.id }) { ActiveCardioCard(it, editor) }
+    val cardioCard: @Composable (CardioBlock) -> Unit = { block ->
+        // Walks, runs and GPS activities record on their own screen in a live session.
+        if (onOpenCardio != null && editor.isLive && CardioRecording.usesSessionScreen(block)) {
+            CardioSessionCard(block, editor) { onOpenCardio(block.id) }
+        } else ActiveCardioCard(block, editor)
+    }
+    items(w.cardio.filter { it.phase == CardioPhase.preWorkout }, key = { it.id }) { cardioCard(it) }
     if (w.exercises.isEmpty() && w.cardio.isEmpty()) {
         item { EmptyState(Icons.Default.Add, "No exercises yet", "Add exercises or cardio to start logging.") }
     }
     blocks.forEach { block ->
         if (block.size > 1) {
-            item(key = "superset-" + block.first().supersetGroupId) { SupersetHeader(block, labels, editor) }
+            item(key = "superset-" + block.first().supersetGroupId) { SupersetHeader(block, labels, editor, w.restEndsAt != null, scrollTarget) }
         }
         items(block, key = { it.id }) { exercise ->
-            ExerciseCard(exercise, labels[exercise.id], w.exercises, editor)
+            ExerciseCard(exercise, labels[exercise.id], w.exercises, editor, w.restEndsAt != null, scrollTarget)
         }
     }
-    items(w.cardio.filter { it.phase == CardioPhase.postWorkout }, key = { it.id }) { ActiveCardioCard(it, editor) }
-    item { AddButtons(editor, hasExercises = w.exercises.isNotEmpty()) }
+    items(w.cardio.filter { it.phase == CardioPhase.postWorkout }, key = { it.id }) { cardioCard(it) }
+    item { AddButtons(editor, hasExercises = w.exercises.isNotEmpty(), onOpenCardio = onOpenCardio) }
     item {
         OutlinedTextField(
             value = w.notes,
@@ -311,7 +353,7 @@ fun LazyListScope.workoutEditorItems(w: ActiveWorkout, editor: WorkoutEditor) {
 }
 
 @Composable
-private fun AddButtons(editor: WorkoutEditor, hasExercises: Boolean) {
+private fun AddButtons(editor: WorkoutEditor, hasExercises: Boolean, onOpenCardio: ((String) -> Unit)?) {
     val distanceUnit = LocalContext.current.app.settings.state.collectAsStateWithLifecycle().value.distanceUnit
     var picking by remember { mutableStateOf(false) }
     var pickingCardio by remember { mutableStateOf(false) }
@@ -326,11 +368,17 @@ private fun AddButtons(editor: WorkoutEditor, hasExercises: Boolean) {
     }
     if (picking) ExercisePickerDialog(onDismiss = { picking = false }, onConfirm = { editor.addExercises(it); picking = false })
     if (pickingCardio) {
-        ExercisePickerDialog(onDismiss = { pickingCardio = false }, mode = PickerMode.Cardio, single = true, onConfirm = {
+        CardioQuickPicker(onDismiss = { pickingCardio = false }) { exercise ->
             pickingCardio = false
             val phase = if (hasExercises) CardioPhase.postWorkout else CardioPhase.preWorkout
-            setup = newCardioBlock(it.first(), phase, if (hasExercises) CardioRole.finisher else CardioRole.warmUp, distanceUnit)
-        })
+            val block = newCardioBlock(exercise, phase, if (hasExercises) CardioRole.finisher else CardioRole.warmUp, distanceUnit)
+            if (onOpenCardio != null && editor.isLive && CardioRecording.usesSessionScreen(block)) {
+                // Walks and runs go straight to recording; a goal can be set from the card later.
+                val open = block.copy(goal = CardioGoal.openEnded, targetDurationSeconds = 0)
+                editor.addCardio(open)
+                onOpenCardio(open.id)
+            } else setup = block
+        }
     }
     setup?.let { block ->
         CardioSetupDialog(block, onDismiss = { setup = null }, onSave = { editor.addCardio(it); setup = null })
@@ -338,10 +386,17 @@ private fun AddButtons(editor: WorkoutEditor, hasExercises: Boolean) {
 }
 
 @Composable
-private fun SupersetHeader(block: List<ExerciseEntry>, labels: Map<String, String>, editor: WorkoutEditor) {
+private fun SupersetHeader(
+    block: List<ExerciseEntry>,
+    labels: Map<String, String>,
+    editor: WorkoutEditor,
+    resting: Boolean,
+    scrollTarget: MutableState<String?>?,
+) {
     val first = block.first()
     val rest = first.supersetRestSeconds ?: first.restSeconds
-    Row(Modifier.padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+    Column(Modifier.padding(top = 4.dp)) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
         Icon(Icons.Default.Link, null, tint = Wgj.colors.gold, modifier = Modifier.size(18.dp))
         Text(
             " Superset ${labels[first.id]?.take(1) ?: ""} · round rest ${formatRest(rest)}",
@@ -352,6 +407,22 @@ private fun SupersetHeader(block: List<ExerciseEntry>, labels: Map<String, Strin
         )
         TextButton(onClick = { editor.setSupersetRest(first.supersetGroupId!!, rest - 15) }) { Text("−15s") }
         TextButton(onClick = { editor.setSupersetRest(first.supersetGroupId!!, rest + 15) }) { Text("+15s") }
+    }
+    // Port of the iOS round guidance: what to do next, tap to jump there.
+    if (editor.isLive && block.size == 2) {
+        val next = SupersetProgression.nextStep(block[0], block[1], labels)
+        if (next == null) {
+            Text("Superset complete", color = Wgj.colors.cyan, fontWeight = FontWeight.SemiBold)
+        } else Surface(onClick = { scrollTarget?.value = next.setId }, color = Color.Transparent) {
+            Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("${if (resting) "Rest, then" else "Go to"} ${next.label}", color = Wgj.colors.cyan, fontWeight = FontWeight.SemiBold)
+                    Text(block.first { it.id == next.exerciseId }.name, style = MaterialTheme.typography.bodySmall)
+                }
+                Icon(Icons.Default.ArrowCircleDown, "Show next set", tint = Wgj.colors.cyan)
+            }
+        }
+    }
     }
 }
 
@@ -373,7 +444,14 @@ private fun WorkoutProgressHeader(w: ActiveWorkout) {
 }
 
 @Composable
-private fun ExerciseCard(exercise: ExerciseEntry, supersetLabel: String?, all: List<ExerciseEntry>, editor: WorkoutEditor) {
+private fun ExerciseCard(
+    exercise: ExerciseEntry,
+    supersetLabel: String?,
+    all: List<ExerciseEntry>,
+    editor: WorkoutEditor,
+    resting: Boolean,
+    scrollTarget: MutableState<String?>?,
+) {
     val repo = LocalContext.current.app.repository
     val previous by produceState(emptyList<SetFactEntity>(), exercise.exerciseUuid) {
         value = repo.lastSessionSets(exercise.exerciseUuid)
@@ -428,12 +506,17 @@ private fun ExerciseCard(exercise: ExerciseEntry, supersetLabel: String?, all: L
             Text(repRange, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
 
+        // In a superset, point at the set to do next (port of WorkoutSupersetSetCue).
+        val next = SupersetProgression.pair(exercise, all)?.takeIf { editor.isLive }?.let { (a, b) ->
+            SupersetProgression.nextStep(a, b, WorkoutEditing.supersetLabels(all))
+        }?.takeIf { it.exerciseId == exercise.id }
         var warmupIndex = 0
         var workingIndex = 0
         exercise.sets.forEach { set ->
             val prev = if (set.isWarmup) previousWarmups.getOrNull(warmupIndex++) else previousWorking.getOrNull(workingIndex++)
             val label = if (set.isWarmup) "W" else workingIndex.toString()
-            SetRow(exercise, set, label, prev, editor)
+            val cue = next?.takeIf { it.setId == set.id }?.let { "${if (resting) "After rest:" else "Do now:"} ${it.label} · ${exercise.name}" }
+            SetRow(exercise, set, label, prev, editor, cue, scrollTarget)
         }
 
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -468,6 +551,7 @@ fun NotesDialog(initial: String, onDismiss: () -> Unit, onSave: (String) -> Unit
     )
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun SetRow(
     exercise: ExerciseEntry,
@@ -475,6 +559,8 @@ private fun SetRow(
     label: String,
     previous: SetFactEntity?,
     editor: WorkoutEditor,
+    cue: String? = null,
+    scrollTarget: MutableState<String?>? = null,
 ) {
     val haptics = LocalHapticFeedback.current
     val context = LocalContext.current
@@ -482,8 +568,28 @@ private fun SetRow(
         if (set.completed) Wgj.colors.success.copy(alpha = 0.14f) else Color.Transparent,
         label = "setBackground",
     )
-    Surface(color = background, shape = MaterialTheme.shapes.medium) {
+    val bringIntoView = remember { BringIntoViewRequester() }
+    val requested = scrollTarget?.value
+    LaunchedEffect(requested) {
+        if (requested == set.id) {
+            bringIntoView.bringIntoView()
+            scrollTarget.value = null
+        }
+    }
+    // After checking off a superset set, move on to whichever set comes next.
+    fun advanceSuperset() {
+        val all = editor.state.value?.exercises ?: return
+        val (a, b) = SupersetProgression.pair(exercise, all) ?: return
+        SupersetProgression.nextStep(a, b, WorkoutEditing.supersetLabels(all))?.let { scrollTarget?.value = it.setId }
+    }
+    Surface(color = background, shape = MaterialTheme.shapes.medium, modifier = Modifier.bringIntoViewRequester(bringIntoView)) {
         Column(Modifier.padding(vertical = 4.dp)) {
+            if (cue != null) {
+                Row(Modifier.padding(start = 4.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.ArrowCircleRight, null, Modifier.size(16.dp), tint = Wgj.colors.cyan)
+                    Text(" $cue", style = MaterialTheme.typography.labelLarge, color = Wgj.colors.cyan, fontWeight = FontWeight.SemiBold)
+                }
+            }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 SetBadge(
                     label = label,
@@ -499,6 +605,7 @@ private fun SetRow(
                     modifier = Modifier.weight(1f),
                     placeholder = if (set.unit == LoadUnit.bodyweight) "+0" else set.targetWeight?.let(::formatNumber) ?: "0",
                     suffix = set.unit.label,
+                    max = MAX_WEIGHT,
                 )
                 NumberField(
                     value = set.reps?.toDouble(),
@@ -506,12 +613,14 @@ private fun SetRow(
                     modifier = Modifier.weight(0.75f),
                     placeholder = set.targetReps?.toString() ?: "reps",
                     integer = true,
+                    max = MAX_REPS,
                 )
                 FilledIconToggleButton(
                     checked = set.completed,
                     onCheckedChange = {
                         if (editor.toggleSetCompleted(exercise.id, set.id, previous)) {
                             haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                            if (editor.isLive && !set.completed) advanceSuperset()
                         } else {
                             Toast.makeText(context, "Enter reps first", Toast.LENGTH_SHORT).show()
                         }
@@ -523,7 +632,7 @@ private fun SetRow(
                     ),
                 ) { Icon(Icons.Default.Check, if (set.completed) "Mark set incomplete" else "Complete set") }
             }
-            set.dropStages.forEach { drop -> DropRow(exercise, set, drop, editor) }
+            set.dropStages.forEachIndexed { i, drop -> DropRow(exercise, set, drop, i, editor) }
             if (previous != null) {
                 Row(Modifier.padding(start = 48.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text(
@@ -544,8 +653,9 @@ private fun SetRow(
 }
 
 @Composable
-private fun DropRow(exercise: ExerciseEntry, set: SetEntry, drop: DropStage, editor: WorkoutEditor) {
+private fun DropRow(exercise: ExerciseEntry, set: SetEntry, drop: DropStage, index: Int, editor: WorkoutEditor) {
     val context = LocalContext.current
+    var menu by remember { mutableStateOf(false) }
     Row(
         Modifier.padding(start = 12.dp, top = 6.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -554,14 +664,22 @@ private fun DropRow(exercise: ExerciseEntry, set: SetEntry, drop: DropStage, edi
         Icon(Icons.Default.SubdirectoryArrowRight, "Drop stage", Modifier.size(20.dp), tint = Wgj.colors.warning)
         NumberField(
             drop.weight, { v -> editor.updateDrop(exercise.id, set.id, drop.id) { it.copy(weight = v) } },
-            Modifier.weight(1f), placeholder = drop.targetWeight?.let(::formatNumber) ?: "0", suffix = drop.unit.label,
+            Modifier.weight(1f), placeholder = drop.targetWeight?.let(::formatNumber) ?: "0", suffix = drop.unit.label, max = MAX_WEIGHT,
         )
         NumberField(
             drop.reps?.toDouble(), { v -> editor.updateDrop(exercise.id, set.id, drop.id) { it.copy(reps = v?.toInt()) } },
-            Modifier.weight(0.75f), placeholder = drop.targetReps?.toString() ?: "reps", integer = true,
+            Modifier.weight(0.75f), placeholder = drop.targetReps?.toString() ?: "reps", integer = true, max = MAX_REPS,
         )
-        IconButton(onClick = { editor.removeDrop(exercise.id, set.id, drop.id) }, Modifier.size(32.dp)) {
-            Icon(Icons.Default.Close, "Remove drop stage", Modifier.size(18.dp))
+        Box {
+            IconButton(onClick = { menu = true }, Modifier.size(32.dp)) {
+                Icon(Icons.Default.MoreVert, "Drop ${index + 1} options", Modifier.size(18.dp))
+            }
+            DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                DropdownMenuItem(
+                    text = { Text("Delete drop", color = MaterialTheme.colorScheme.error) },
+                    onClick = { menu = false; editor.removeDrop(exercise.id, set.id, drop.id) },
+                )
+            }
         }
         FilledIconToggleButton(
             checked = drop.completed,
@@ -596,7 +714,7 @@ private fun RestTimerDock(workout: ActiveWorkout, store: ActiveWorkoutStore) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text("Rest Timer", style = MaterialTheme.typography.labelMedium, color = Wgj.colors.success)
-                    Text(workout.restLabel ?: "", style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(workout.restLabel ?: "", style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 }
                 TextButton(onClick = { store.adjustRest(-15) }) { Text("−15") }
                 Text(formatClock(remaining), fontSize = 32.sp, fontWeight = FontWeight.Bold, color = Wgj.colors.success)
@@ -611,6 +729,10 @@ private fun RestTimerDock(workout: ActiveWorkout, store: ActiveWorkoutStore) {
         }
     }
 }
+
+/** Upper bounds for typed loads and reps, so a slip of the finger can't skew records. */
+const val MAX_WEIGHT = 5000.0
+const val MAX_REPS = 999.0
 
 @Composable
 fun PrBadge() {

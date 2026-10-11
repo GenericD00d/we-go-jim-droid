@@ -49,14 +49,14 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.wegojim.android.data.CardioBlock
 import com.wegojim.android.data.CardioGoal
-import com.wegojim.android.data.CardioMetrics
+import com.wegojim.android.data.CardioSummary
 import com.wegojim.android.data.CardioPhase
 import com.wegojim.android.data.CardioRole
 import com.wegojim.android.data.DistanceUnit
 import com.wegojim.android.data.WorkoutEditor
 import kotlinx.coroutines.delay
 
-fun formatDistance(meters: Double, unit: DistanceUnit) = "${formatNumber(unit.fromMeters(meters))} ${unit.symbol}"
+fun formatDistance(meters: Double, unit: DistanceUnit) = "${CardioSummary.number(unit.fromMeters(meters))} ${unit.symbol}"
 
 fun cardioGoalSummary(c: CardioBlock): String = when (c.goal) {
     CardioGoal.time -> formatDuration(c.targetDurationSeconds)
@@ -64,16 +64,8 @@ fun cardioGoalSummary(c: CardioBlock): String = when (c.goal) {
     CardioGoal.openEnded -> "Open"
 }
 
-fun cardioResultSummary(c: CardioBlock): String = buildList {
-    c.durationSeconds?.let { add(formatClock(it.toLong())) }
-    c.distanceMeters?.let { add(formatDistance(it, c.distanceUnit)) }
-    val m = CardioMetrics.calculate(c.durationSeconds, c.distanceMeters, c.distanceUnit, c.profile)
-    m.paceSecondsPerUnit?.let { add("${formatClock(it.toLong())} /${c.distanceUnit.symbol}") }
-    m.rowSplitSecondsPer500m?.let { add("${formatClock(it.toLong())} /500m") }
-    if (m.paceSecondsPerUnit == null) m.speedPerHour?.let { add("${formatNumber(Math.round(it * 10) / 10.0)} ${c.distanceUnit.symbol}/h") }
-    c.inclinePercent?.let { add("${formatNumber(it)}% incline") }
-    c.resistanceLevel?.let { add("level ${formatNumber(it)}") }
-}.joinToString(" · ").ifEmpty { "Not logged" }
+fun cardioResultSummary(c: CardioBlock): String =
+    CardioSummary.metrics(c).joinToString(" · ") { it.value }.ifEmpty { "Not logged" }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -91,7 +83,12 @@ fun <T> Segmented(options: List<T>, selected: T?, label: (T) -> String, onSelect
 
 /** Phase, role and goal for a cardio block (templates and live workouts). */
 @Composable
-fun CardioSetupDialog(initial: CardioBlock, onDismiss: () -> Unit, onSave: (CardioBlock) -> Unit) {
+fun CardioSetupDialog(
+    initial: CardioBlock,
+    onDismiss: () -> Unit,
+    roles: List<CardioRole> = CardioRole.entries,
+    onSave: (CardioBlock) -> Unit,
+) {
     var block by remember { mutableStateOf(initial) }
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -101,7 +98,7 @@ fun CardioSetupDialog(initial: CardioBlock, onDismiss: () -> Unit, onSave: (Card
                 Text("When", style = MaterialTheme.typography.labelLarge)
                 Segmented(CardioPhase.entries, block.phase, { it.label }) { block = block.copy(phase = it) }
                 Text("Role", style = MaterialTheme.typography.labelLarge)
-                Segmented(CardioRole.entries, block.role, { it.label }) { block = block.copy(role = it) }
+                Segmented(roles, block.role, { it.label }) { block = block.copy(role = it) }
                 Text("Goal", style = MaterialTheme.typography.labelLarge)
                 Segmented(CardioGoal.entries.filter { it != CardioGoal.distance || block.profile.tracksDistance }, block.goal, { it.label }) {
                     block = block.copy(goal = it)
@@ -162,7 +159,14 @@ private fun CardioHeader(block: CardioBlock, onEdit: () -> Unit, onRemove: () ->
 fun CardioPlanCard(block: CardioBlock, onChange: (CardioBlock) -> Unit, onRemove: () -> Unit) {
     var editing by remember { mutableStateOf(false) }
     SectionCard { CardioHeader(block, onEdit = { editing = true }, onRemove = onRemove) }
-    if (editing) CardioSetupDialog(block, onDismiss = { editing = false }, onSave = { onChange(it); editing = false })
+    if (editing) {
+        CardioSetupDialog(
+            block,
+            onDismiss = { editing = false },
+            roles = if (block.role == CardioRole.main) CardioRole.entries else TEMPLATE_CARDIO_ROLES,
+            onSave = { onChange(it); editing = false },
+        )
+    }
 }
 
 /** Live cardio block with a timer, result inputs and derived pace/speed. */

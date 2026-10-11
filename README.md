@@ -22,9 +22,16 @@ Jetpack Compose and keeps the iOS app's behaviour, formulas and template file fo
   rest timers, dropsets, two-exercise supersets, rotating alternative exercises and cardio blocks.
 - **Log without losing context.** Start empty or from a template, see last session's numbers with
   *Fill Last*, get training guidance (warm-ups, rep targets, when to change the load), and run rest timers
-  that notify on time in the background. Supersets rest after the second exercise.
+  that notify on time in the background. Supersets guide you round by round (A1, A2, rest) and jump to
+  the next set.
 - **Cardio alongside strength.** Warm-up, main and finisher blocks with time, distance or open goals,
-  live timers with goal alerts, and pace, speed or rowing split.
+  live timers with goal alerts, and pace, speed or rowing split. Start a cardio-only session from the
+  Workout tab and review the result (time, distance, pace) when you finish.
+- **Record outdoor routes.** Outdoor Walk, Run and Bike record distance and your route with GPS, including
+  with the screen locked. Pausing or finishing stops GPS. Routes stay on the device, appear in history and
+  can be included in the shared workout image.
+- **Follow the session from the lock screen.** An optional ongoing notification (off by default) shows the
+  workout timer, set progress, rest countdown, or cardio distance and pace.
 - **Resume reliably.** The active workout is kept in memory and snapshotted to disk, so it survives
   minimising, backgrounding and the app being killed.
 - **Finish cleanly.** Summary with PRs (estimated 1RM), volume, estimated calories, the muscles you worked,
@@ -33,6 +40,11 @@ Jetpack Compose and keeps the iOS app's behaviour, formulas and template file fo
   catalog, and weekly and per-workout heatmaps drawn on the body.
 - **History and progress.** List and calendar views, edit or delete past workouts, save any workout as a
   template, compare two workouts, and chart per-exercise trends for 1RM, max weight, volume and reps.
+- **Your Journey.** A lifetime calendar and timeline of weight and bodyweight-rep PRs, cardio PRs
+  (longest distance, fastest average speed over 1 km), workout counts, training hours, active days and
+  weekly streaks, with playful milestone celebrations, a goal catalog, yearly stats and a shareable
+  *My Year in Training* recap. Share any PR or milestone as an image. Everything is rebuilt from your
+  history; nothing extra is stored.
 - **Profile dashboard.** Configurable cards for weekly goal, coach brief, streaks, PRs, muscle heatmap,
   consistency calendar, top exercises, exercise trends and calories, plus an avatar, 39 athlete types and
   six themes (with a December-only one).
@@ -42,7 +54,7 @@ Jetpack Compose and keeps the iOS app's behaviour, formulas and template file fo
 - **Share templates with iPhone users.** `.wgjtemplate` files are wire-compatible with the iOS app
   (format version 8, single templates and folders). Open one from any app to import it.
 
-A bundled catalog of 247 exercises, the same one the iOS app ships, works offline, and you can add
+A bundled catalog of 248 exercises, the same one the iOS app ships, works offline, and you can add
 your own.
 
 ## Install
@@ -75,12 +87,13 @@ Requires JDK 17 and the Android SDK (compileSdk 36).
 | CloudKit private backup | Android Auto Backup + backup file export/restore |
 | Apple Health export | Health Connect export (opt-in) |
 | WidgetKit weekly goal widget | Glance home screen widget |
+| Workout Live Activities | Opt-in ongoing workout notification |
+| Core Location + MapKit routes | Location foreground service; routes drawn on their own, without map tiles (the app has no network access) |
 | On-device Foundation Models coach copy | The iOS deterministic coach recap (same rules) |
 | MuscleMap Swift package | Same artwork, generated into Kotlin by `scripts/gen_body_paths.py` |
 | Exercise images fetched from an online catalog | Not included; the bundled catalog has no images |
 
-Not ported (added to the iOS app after this port was made): GPS routes, Live Activities, outdoor
-cycling, and the training journey and yearly recaps. iOS-only items such as App Store review prompts
+This port follows the iOS app up to version 1.5.1. iOS-only items such as App Store review prompts
 are out of scope.
 
 ## Architecture
@@ -97,7 +110,10 @@ restored, projected or summarised lives in `data/`.
     - `TrainingGuidance`.
     - `Transfer`: `.wgjtemplate` files and backups.
 - `ui/` holds the Compose screens. `ui/body/` is the muscle map renderer and the region mapping.
-- `RestTimerAlarm`, `WeeklyGoalWidget` and `HealthConnectExport` are the platform integrations.
+  - `Journey`: the Journey, achievements, celebrations, cardio PRs and year recaps.
+  - `CardioRoute` and `RouteStore`: GPS route filtering and the route files.
+- `RestTimerAlarm`, `WeeklyGoalWidget`, `HealthConnectExport`, `CardioRecordingService` (GPS) and
+  `LiveWorkoutNotification` are the platform integrations.
 
 ## Credits and license
 

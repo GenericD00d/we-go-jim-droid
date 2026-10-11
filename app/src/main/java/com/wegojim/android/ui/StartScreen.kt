@@ -26,6 +26,7 @@ import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.automirrored.filled.ViewList
+import androidx.compose.material.icons.automirrored.filled.DirectionsRun
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
@@ -81,6 +82,7 @@ fun StartScreen(nav: NavHostController) {
     val active by store.state.collectAsStateWithLifecycle()
 
     var preview by remember { mutableStateOf<TemplateEntity?>(null) }
+    var pickingCardio by remember { mutableStateOf(false) }
     var pendingStart by remember { mutableStateOf<(suspend () -> Unit)?>(null) }
     var deleting by remember { mutableStateOf<TemplateEntity?>(null) }
 
@@ -105,16 +107,21 @@ fun StartScreen(nav: NavHostController) {
                         Text("Quick Start", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                     }
                     Text(
-                        if (active != null) "You have a workout in progress." else "Start an empty session and add exercises as you go.",
+                        if (active != null) "You have a workout in progress." else "Start an empty session, or record a walk, run or ride.",
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     if (active != null) {
                         Button(onClick = { nav.navigate(Routes.WORKOUT) }, Modifier.fillMaxWidth()) {
                             Icon(Icons.Default.PlayArrow, null); Spacer(Modifier.width(6.dp)); Text("Resume ${active!!.name}")
                         }
-                        OutlinedButton(onClick = { begin { store.startEmpty() } }, Modifier.fillMaxWidth()) { Text("Start Empty Workout") }
-                    } else {
-                        Button(onClick = { begin { store.startEmpty() } }, Modifier.fillMaxWidth()) { Text("Start Empty Workout") }
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        val start: @Composable (String, androidx.compose.ui.graphics.vector.ImageVector, () -> Unit) -> Unit = { label, icon, onClick ->
+                            if (active != null) OutlinedButton(onClick = onClick, Modifier.weight(1f)) { Icon(icon, null); Spacer(Modifier.width(6.dp)); Text(label) }
+                            else Button(onClick = onClick, Modifier.weight(1f)) { Icon(icon, null); Spacer(Modifier.width(6.dp)); Text(label) }
+                        }
+                        start("Workout", Icons.Default.PlayArrow) { begin { store.startEmpty() } }
+                        start("Cardio", Icons.AutoMirrored.Filled.DirectionsRun) { pickingCardio = true }
                     }
                 }
             }
@@ -178,6 +185,13 @@ fun StartScreen(nav: NavHostController) {
                     }
                 }
             }
+        }
+    }
+
+    if (pickingCardio) {
+        CardioQuickPicker(onDismiss = { pickingCardio = false }) { exercise ->
+            pickingCardio = false
+            begin { store.startCardio(exercise) }
         }
     }
 

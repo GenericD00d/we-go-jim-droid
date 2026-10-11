@@ -47,6 +47,8 @@ import androidx.navigation.compose.rememberNavController
 import com.wegojim.android.app
 import com.wegojim.android.data.ActiveWorkout
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import androidx.compose.runtime.rememberCoroutineScope
 
 object Routes {
     const val PROFILE = "profile"
@@ -60,11 +62,16 @@ object Routes {
     const val WORKOUT_DETAIL = "workoutDetail/{id}?summary={summary}"
     const val EXERCISE_DETAIL = "exercise/{uuid}"
     const val SETTINGS = "settings"
+    const val CARDIO = "cardio/{id}"
+    const val JOURNEY = "journey"
+    const val ACHIEVEMENTS = "achievements/{page}"
 
     fun template(id: String, folderId: String? = null) = "template/$id" + (folderId?.let { "?folder=$it" } ?: "")
     fun editWorkout(id: String) = "editWorkout/$id"
     fun workoutDetail(id: String, summary: Boolean = false) = "workoutDetail/$id?summary=$summary"
     fun exercise(uuid: String) = "exercise/$uuid"
+    fun cardio(activityId: String) = "cardio/$activityId"
+    fun achievements(page: String) = "achievements/$page"
 }
 
 private data class Tab(val route: String, val label: String, val icon: ImageVector)
@@ -126,7 +133,28 @@ fun WgjRoot() {
                 WorkoutDetailScreen(nav, it.arguments?.getString("id")!!, it.arguments?.getString("summary") == "true")
             }
             composable(Routes.EXERCISE_DETAIL) { ExerciseDetailScreen(nav, it.arguments?.getString("uuid")!!) }
+            composable(Routes.CARDIO) {
+                val store = LocalContext.current.app.activeWorkout
+                val scope = rememberCoroutineScope()
+                CardioRecordingScreen(nav, it.arguments?.getString("id")!!, onSaveWorkout = {
+                    scope.launch {
+                        val id = store.finish()
+                        if (id != null) nav.navigate(Routes.workoutDetail(id, summary = true)) { popUpTo(Routes.START) }
+                    }
+                })
+            }
+            composable(Routes.JOURNEY) { JourneyScreen(nav) }
+            composable(Routes.ACHIEVEMENTS) { AchievementsScreen(nav, it.arguments?.getString("page") ?: "earned") }
         }
+    }
+
+    // Tapping the workout notification opens the active workout.
+    val openRequested by LocalContext.current.app.openWorkoutRequest.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    LaunchedEffect(openRequested) {
+        if (!openRequested) return@LaunchedEffect
+        context.app.openWorkoutRequest.value = false
+        if (context.app.activeWorkout.isActive && nav.currentDestination?.route != Routes.WORKOUT) nav.navigate(Routes.WORKOUT)
     }
 }
 

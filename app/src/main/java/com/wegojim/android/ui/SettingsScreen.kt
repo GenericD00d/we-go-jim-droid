@@ -134,6 +134,13 @@ fun SettingsScreen(nav: NavHostController) {
                     )
                     SwitchRow("Start rest timer when a set is completed", settings.autoStartRestTimer) { v -> store.update { it.copy(autoStartRestTimer = v) } }
                     SwitchRow("Keep screen awake during workouts", settings.keepScreenAwake) { v -> store.update { it.copy(keepScreenAwake = v) } }
+                    SwitchRow("Show workout notification", settings.liveNotification) { v -> store.update { it.copy(liveNotification = v) } }
+                    Text(
+                        "Shows the workout timer, set progress, rest countdown, or cardio distance and pace on your lock screen and in the notification shade. " +
+                            "Anyone who can see your screen can see these details.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
             }
             item { SectionHeader("Appearance") }
@@ -208,6 +215,23 @@ fun SettingsScreen(nav: NavHostController) {
                     )
                 }
             }
+            item { SectionHeader("Outdoor routes") }
+            item {
+                SectionCard {
+                    Text(
+                        "Location is used only while recording an outdoor walk, run or bike ride, including with your screen locked. " +
+                            "Pausing or finishing stops GPS. Routes are saved on this device, included in backups, and never sent to Health Connect. " +
+                            "Deleting a workout removes its route.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(
+                        "Shared cardio images can include your route and its start and end points. Check the preview before you share.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
             item { SectionHeader("Your data") }
             item {
                 SectionCard {
@@ -228,7 +252,9 @@ fun SettingsScreen(nav: NavHostController) {
                     Text(
                         "An Android port of We Go Jim by Andreas Hortlund (github.com/Hortlund/we-go-jim), MIT License. " +
                             "Muscle map artwork from MuscleMap by Melih Colpan (github.com/melihcolpan/MuscleMap), MIT License. " +
-                            "Your data stays on this device and is included in Android's device backup.",
+                            "Your data stays on this device and is included in Android's device backup. " +
+                            "Training guidance, achievement goals, personal records, yearly recaps, charts and calorie estimates are informational only. " +
+                            "GPS distance and pace depend on signal quality; We Go Jim is not a navigation or emergency service.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -250,7 +276,8 @@ fun SettingsScreen(nav: NavHostController) {
                             val text = withContext(Dispatchers.IO) {
                                 context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
                             } ?: error("Couldn't read the file.")
-                            val backup = app.repository.restoreBackup(text)
+                            val keep = app.activeWorkout.state.value?.cardio.orEmpty().map { it.id }.toSet()
+                            val backup = app.repository.restoreBackup(text, keep)
                             "Restored ${backup.workouts.size} workouts and ${backup.templates.size} templates"
                         }.getOrElse { it.message ?: "Restore failed" }
                         Toast.makeText(context, message, Toast.LENGTH_LONG).show()

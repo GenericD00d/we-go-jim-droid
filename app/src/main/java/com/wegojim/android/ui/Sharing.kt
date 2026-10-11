@@ -32,10 +32,10 @@ fun shareTextFile(context: Context, name: String, extension: String, content: St
     shareFile(context, file, "application/octet-stream", title)
 }
 
-fun shareImage(context: Context, name: String, bitmap: Bitmap) {
+fun shareImage(context: Context, name: String, bitmap: Bitmap, title: String = "Share workout") {
     val file = File(sharedDir(context), "${safeName(name)}.png")
     file.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
-    shareFile(context, file, "image/png", "Share workout")
+    shareFile(context, file, "image/png", title)
 }
 
 /** Reads a .wgjtemplate (or JSON) from a content Uri and saves it; reports the result as a toast. */

@@ -22,6 +22,9 @@ interface WorkoutEditor {
 
     fun onCardioTimerChanged(block: CardioBlock) {}
 
+    /** Called after cardio blocks leave the workout, so their recorded routes can go too. */
+    fun onCardioRemoved(ids: List<String>) {}
+
     private fun exercises(f: (List<ExerciseEntry>) -> List<ExerciseEntry>) = update { it.copy(exercises = f(it.exercises)) }
 
     fun updateExercise(id: String, f: (ExerciseEntry) -> ExerciseEntry) = exercises { WorkoutEditing.updateExercise(it, id, f) }
@@ -65,7 +68,7 @@ interface WorkoutEditor {
             unit = if (useFallback && set.weight == null) fallback!!.unit else set.unit,
         )
         updateSet(exerciseId, setId) { done }
-        if (done.dropStages.isEmpty()) onSetCompleted(exercise, done)
+        if (done.isCycleCompleted) state.value?.exercises?.firstOrNull { it.id == exerciseId }?.let { onSetCompleted(it, done) }
         return true
     }
 
@@ -81,19 +84,27 @@ interface WorkoutEditor {
         val reps = drop.reps ?: drop.targetReps
         if (reps == null || reps <= 0) return false
         updateDrop(exerciseId, setId, dropId) { it.copy(completed = true, reps = reps, weight = it.weight ?: it.targetWeight) }
-        if (set.dropStages.last().id == dropId) onSetCompleted(exercise, set)
+        val updated = state.value?.exercises?.firstOrNull { it.id == exerciseId }
+        val done = updated?.sets?.firstOrNull { it.id == setId }
+        if (updated != null && done != null && done.isCycleCompleted) onSetCompleted(updated, done)
         return true
     }
 
     // region cardio
 
     fun addCardio(block: CardioBlock) = update { it.copy(cardio = it.cardio + block) }
-    fun removeCardio(id: String) = update { it.copy(cardio = it.cardio.filterNot { c -> c.id == id }) }
+    fun removeCardio(id: String) {
+        update { it.copy(cardio = it.cardio.filterNot { c -> c.id == id }) }
+        onCardioRemoved(listOf(id))
+    }
     fun updateCardio(id: String, f: (CardioBlock) -> CardioBlock) = update { w -> w.copy(cardio = w.cardio.map { if (it.id == id) f(it) else it }) }
 
-    fun startCardioTimer(id: String) {
+    /** Returns false when another activity's timer is running; only one records at a time. */
+    fun startCardioTimer(id: String): Boolean {
+        if (state.value?.cardio?.any { it.id != id && it.isRunning } == true) return false
         updateCardio(id) { if (it.isRunning) it else it.copy(timerStartedAt = System.currentTimeMillis(), completed = false) }
         state.value?.cardio?.firstOrNull { it.id == id }?.let(::onCardioTimerChanged)
+        return true
     }
 
     fun pauseCardioTimer(id: String) {
@@ -120,6 +131,42 @@ interface WorkoutEditor {
                     distanceMeters = c.distanceMeters ?: c.targetDistanceMeters.takeIf { c.goal == CardioGoal.distance },
                 )
             }
+        }
+        state.value?.cardio?.firstOrNull { it.id == id }?.let(::onCardioTimerChanged)
+    }
+
+    /**
+     * Ends a recorded activity: the timer's time becomes the result, and a GPS
+     * route's distance is used when one was recorded.
+     */
+    fun finishCardio(id: String, recordedDistanceMeters: Double?) {
+        updateCardio(id) { c ->
+            val elapsed = c.elapsedSeconds()
+            c.copy(
+                completed = true,
+                timerStartedAt = null,
+                timerAccumulatedSeconds = elapsed,
+                durationSeconds = elapsed.takeIf { it > 0 } ?: c.durationSeconds,
+                distanceMeters = recordedDistanceMeters?.takeIf { it > 0 } ?: c.distanceMeters,
+            )
+        }
+        state.value?.cardio?.firstOrNull { it.id == id }?.let(::onCardioTimerChanged)
+    }
+
+    /** Saves a reviewed result; the activity counts as completed afterwards. */
+    fun saveCardioResult(id: String, result: CardioResult) {
+        updateCardio(id) { c ->
+            c.copy(
+                durationSeconds = result.durationSeconds,
+                distanceMeters = result.distanceMeters,
+                distanceUnit = result.distanceUnit,
+                inclinePercent = result.inclinePercent,
+                resistanceLevel = result.resistanceLevel,
+                notes = result.notes,
+                completed = true,
+                timerAccumulatedSeconds = if (c.completed) c.timerAccumulatedSeconds else c.elapsedSeconds(),
+                timerStartedAt = null,
+            )
         }
         state.value?.cardio?.firstOrNull { it.id == id }?.let(::onCardioTimerChanged)
     }

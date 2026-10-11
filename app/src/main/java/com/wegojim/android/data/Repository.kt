@@ -35,6 +35,7 @@ class Repository(
     private val context: Context,
     private val db: AppDatabase,
     private val settings: SettingsStore,
+    private val routes: RouteStore,
 ) {
     val exercises: Flow<List<ExerciseEntity>> = db.exercises().all()
     val templates: Flow<List<TemplateEntity>> = db.templates().all()
@@ -100,12 +101,21 @@ class Repository(
 
     suspend fun deleteTemplate(id: String) = db.templates().delete(id)
 
+    /** Copies get their own ids throughout, including superset groups, drops and cardio. */
     suspend fun duplicateTemplate(id: String) {
         val source = db.templates().get(id) ?: return
+        val groups = mutableMapOf<String, String>()
         saveTemplate(source.copy(
             id = newId(),
             name = source.name + " (copy)",
-            exercises = source.exercises.map { e -> e.copy(id = newId(), sets = e.sets.map { it.copy(id = newId()) }) },
+            exercises = source.exercises.map { e ->
+                e.copy(
+                    id = newId(),
+                    supersetGroupId = e.supersetGroupId?.let { groups.getOrPut(it) { newId() } },
+                    sets = e.sets.map { s -> s.copy(id = newId(), dropStages = s.dropStages.map { it.copy(id = newId()) }) },
+                )
+            },
+            cardio = source.cardio.map { it.copy(id = newId()) },
         ))
     }
 
@@ -177,15 +187,24 @@ class Repository(
         customExercises = db.exercises().customExercises().map {
             CustomExerciseBackup(it.uuid, it.name, it.category, it.equipment, it.primaryMuscles, it.secondaryMuscles, it.cardioProfile)
         },
+        cardioRoutes = withContext(Dispatchers.IO) { savedRoutes() },
     ))
+
+    /** Completed routes that belong to saved workouts; live or orphaned ones stay out of backups. */
+    private suspend fun savedRoutes(): List<CardioRoute> {
+        val owners = db.workouts().allNow().flatMap { w -> w.cardio.map { it.id to w.id } }.toMap()
+        return routes.all().filter { owners[it.activityId] == it.sessionId && it.isValid() && it.points.isNotEmpty() }
+    }
 
     /**
      * Replaces all user data with a backup. Workouts are re-saved oldest first
      * so PRs and set facts are recomputed consistently.
      */
-    suspend fun restoreBackup(text: String): BackupFile {
+    suspend fun restoreBackup(text: String, keepRouteIds: Set<String> = emptySet()): BackupFile {
         val backup = runCatching { AppJson.decodeFromString(BackupFile.serializer(), text) }
             .getOrElse { throw IllegalArgumentException("This file isn't a We Go Jim backup.") }
+        val owners = backup.workouts.flatMap { w -> w.cardio.map { it.id to w.id } }.toMap()
+        val restoredRoutes = backup.cardioRoutes.filter { owners[it.activityId] == it.sessionId && it.isValid() }
         db.withTransaction {
             db.workouts().deleteAllFacts()
             db.workouts().deleteAll()
@@ -203,6 +222,8 @@ class Repository(
                 saveWorkout(it.id, it.templateId, it.name, it.notes, it.startedAt, it.endedAt, it.exercises, it.cardio)
             }
         }
+        // Routes follow the restored history; the in-progress workout keeps its own.
+        withContext(Dispatchers.IO) { routes.replaceAll(restoredRoutes, keepRouteIds) }
         return backup
     }
 
@@ -231,6 +252,8 @@ class Repository(
 
     /** Re-saves an edited completed workout, recomputing facts and PRs. */
     suspend fun updateCompletedWorkout(original: WorkoutEntity, edited: ActiveWorkout) {
+        val kept = edited.cardio.filter { it.completed }.map { it.id }.toSet()
+        withContext(Dispatchers.IO) { routes.delete(original.cardio.map { it.id }.filter { it !in kept }) }
         saveWorkout(
             id = original.id,
             templateId = original.templateId,
@@ -259,9 +282,14 @@ class Repository(
         else c.copy(completed = true, durationSeconds = duration, timerStartedAt = null, timerAccumulatedSeconds = elapsed)
     }
 
-    suspend fun deleteWorkout(id: String) = db.withTransaction {
-        db.workouts().deleteFacts(id)
-        db.workouts().delete(id)
+    /** Deleting a workout also removes the routes it recorded. */
+    suspend fun deleteWorkout(id: String) {
+        val cardio = db.workouts().allNow().firstOrNull { it.id == id }?.cardio.orEmpty().map { it.id }
+        db.withTransaction {
+            db.workouts().deleteFacts(id)
+            db.workouts().delete(id)
+        }
+        withContext(Dispatchers.IO) { routes.delete(cardio) }
     }
 
     private suspend fun saveWorkout(

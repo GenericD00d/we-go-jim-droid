@@ -6,8 +6,15 @@
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- Outdoor walk, run and bike routes. Only used while recording, from a foreground service. -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
     <uses-permission android:name="android.permission.health.WRITE_EXERCISE" />
     <uses-permission android:name="android.permission.health.WRITE_ACTIVE_CALORIES_BURNED" />
+
+    <uses-feature android:name="android.hardware.location.gps" android:required="false" />
 
     <queries>
         <package android:name="com.google.android.apps.healthdata" />
@@ -51,6 +58,11 @@
         </activity>
 
         <receiver android:name=".RestTimerReceiver" android:exported="false" />
+
+        <service
+            android:name=".CardioRecordingService"
+            android:exported="false"
+            android:foregroundServiceType="location" />
 
         <receiver android:name=".WeeklyGoalWidgetReceiver" android:exported="true" android:label="Weekly Goal">
             <intent-filter>

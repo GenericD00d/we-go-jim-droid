@@ -2,6 +2,7 @@ package com.wegojim.android.data
 
 import android.content.Context
 import com.wegojim.android.RestTimerAlarm
+import com.wegojim.android.RouteRecorder
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
@@ -10,6 +11,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
@@ -25,6 +27,7 @@ class ActiveWorkoutStore(
     private val context: Context,
     private val repository: Repository,
     private val settings: SettingsStore,
+    private val routes: RouteRecorder,
     scope: CoroutineScope,
     private val onFinished: (workoutId: String) -> Unit = {},
 ) : WorkoutEditor {
@@ -44,6 +47,13 @@ class ActiveWorkoutStore(
 
     fun startEmpty() = start(ActiveWorkout(name = "Workout"))
 
+    /** A cardio-only session around one activity (port of CardioSessionStarter). */
+    fun startCardio(exercise: ExerciseEntity) {
+        val block = newCardioBlock(exercise, CardioPhase.postWorkout, CardioRole.main, settings.state.value.distanceUnit)
+            .copy(goal = CardioGoal.openEnded, targetDurationSeconds = 0)
+        start(ActiveWorkout(name = exercise.name, cardio = listOf(block)))
+    }
+
     suspend fun startFromTemplate(template: TemplateEntity) {
         val picks = repository.rotationPicks(template)
         start(WorkoutEditing.workoutFromTemplate(template) { picks[it.id] })
@@ -56,7 +66,14 @@ class ActiveWorkoutStore(
 
     override fun update(transform: (ActiveWorkout) -> ActiveWorkout) = _state.update { it?.let(transform) }
 
+    /** Throws the session away, including any routes it recorded. */
     fun discard() {
+        val cardio = _state.value?.cardio.orEmpty().map { it.id }
+        clear()
+        routes.forget(cardio)
+    }
+
+    private fun clear() {
         RestTimerAlarm.cancel(context)
         _state.value?.cardio?.forEach { RestTimerAlarm.cancelCardio(context, it.id) }
         _state.value = null
@@ -66,12 +83,19 @@ class ActiveWorkoutStore(
     /** Saves to history. Returns the workout id, or null if nothing was logged. */
     suspend fun finish(syncTemplate: Boolean = false): String? {
         val workout = _state.value ?: return null
+        // The route must be on disk before the session that owns it is saved.
+        routes.flush()
         if (syncTemplate && workout.templateId != null) repository.applyWorkoutToTemplate(workout.templateId, workout)
         val id = repository.finishWorkout(workout)
-        discard()
+        // Routes of activities that weren't kept have nothing to belong to.
+        val kept = repository.workout(id ?: "").first()?.cardio.orEmpty().map { it.id }.toSet()
+        clear()
+        routes.forget(workout.cardio.map { it.id }.filter { it !in kept })
         if (id != null) onFinished(id)
         return id
     }
+
+    override fun onCardioRemoved(ids: List<String>) = routes.forget(ids)
 
     suspend fun templateSyncPreview(): TemplateSyncPreview? {
         val workout = _state.value ?: return null
@@ -86,11 +110,21 @@ class ActiveWorkoutStore(
     override fun onSetCompleted(exercise: ExerciseEntry, set: SetEntry) {
         if (!settings.state.value.autoStartRestTimer) return
         val exercises = _state.value?.exercises ?: return
-        val group = exercise.supersetGroupId
+        val pair = SupersetProgression.pair(exercise, exercises)
         val rest: Int
         val label: String
-        if (group != null) {
-            val members = exercises.filter { it.supersetGroupId == group }
+        if (pair != null) {
+            val (first, second) = pair
+            rest = SupersetProgression.restSeconds(set.id, exercise.id, first, second, first.supersetRestSeconds ?: first.restSeconds)
+            if (rest <= 0) {
+                // Mid-round: go straight to the partner, so a running rest no longer applies.
+                skipRest()
+                return
+            }
+            val next = SupersetProgression.nextStep(first, second, WorkoutEditing.supersetLabels(exercises))
+            label = next?.let { step -> "Next: ${step.label} · ${exercises.first { it.id == step.exerciseId }.name}" } ?: "Superset complete"
+        } else if (exercise.supersetGroupId != null) {
+            val members = exercises.filter { it.supersetGroupId == exercise.supersetGroupId }
             if (members.lastOrNull()?.id != exercise.id) return
             rest = exercise.supersetRestSeconds ?: exercise.restSeconds
             label = members.joinToString(" + ") { it.name }
@@ -137,9 +171,17 @@ class ActiveWorkoutStore(
 
     // endregion
 
-    private fun load(): ActiveWorkout? = runCatching {
-        if (file.exists()) AppJson.decodeFromString(ActiveWorkout.serializer(), file.readText()) else null
-    }.getOrNull()
+    /**
+     * A snapshot that can't be decoded is set aside rather than overwritten by
+     * the next workout, so it can still be recovered from the device.
+     */
+    private fun load(): ActiveWorkout? {
+        if (!file.exists()) return null
+        return runCatching { AppJson.decodeFromString(ActiveWorkout.serializer(), file.readText()) }.getOrElse {
+            file.renameTo(File(file.parentFile, "active_workout.corrupt-${System.currentTimeMillis()}.json"))
+            null
+        }
+    }
 
     @Synchronized
     private fun persist(workout: ActiveWorkout?) {

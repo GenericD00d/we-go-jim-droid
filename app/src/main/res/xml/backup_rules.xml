@@ -4,4 +4,5 @@
     <include domain="database" path="." />
     <include domain="sharedpref" path="." />
     <include domain="file" path="active_workout.json" />
+    <include domain="file" path="routes/" />
 </full-backup-content>

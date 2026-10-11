@@ -94,5 +94,7 @@ object RestTimerAlarm {
 class RestTimerReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         RestTimerAlarm.notify(context, intent)
+        // The ongoing workout notification switches from the rest countdown back to the session clock.
+        LiveWorkoutNotification.refresh(context)
     }
 }

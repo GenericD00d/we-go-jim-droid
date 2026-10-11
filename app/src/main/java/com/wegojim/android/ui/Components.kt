@@ -93,6 +93,7 @@ fun NumberField(
     suffix: String? = null,
     integer: Boolean = false,
     enabled: Boolean = true,
+    max: Double? = null,
 ) {
     var field by remember { mutableStateOf(TextFieldValue(value?.let(::formatNumber) ?: "")) }
     var selectAllPending by remember { mutableStateOf(false) }
@@ -111,7 +112,7 @@ fun NumberField(
             selectAllPending = false
             val cleaned = input.text.filter { it.isDigit() || (!integer && (it == '.' || it == ',')) }
             field = input.copy(text = cleaned, selection = if (cleaned == input.text) input.selection else TextRange(cleaned.length))
-            onValueChange(parseDecimal(cleaned)?.let { if (integer) it.toInt().toDouble() else it })
+            onValueChange(parseDecimal(cleaned)?.let { if (integer) it.toInt().toDouble() else it }?.let { if (max != null) minOf(it, max) else it })
         },
         modifier = modifier.onFocusChanged { state ->
             selectAllPending = state.isFocused

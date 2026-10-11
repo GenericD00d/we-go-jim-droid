@@ -20,6 +20,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.wegojim.android.data.CardioBlock
+import com.wegojim.android.data.CardioRole
+import com.wegojim.android.data.CardioSummary
 import com.wegojim.android.data.LoadUnit
 import com.wegojim.android.data.PerformanceMath
 import com.wegojim.android.data.WorkoutEntity
@@ -49,6 +52,12 @@ fun WorkoutShareCard(workout: WorkoutEntity, unit: LoadUnit, layer: GraphicsLaye
         Text("WE GO JIM", color = accent, fontWeight = FontWeight.Black, fontSize = 13.sp, letterSpacing = 3.sp)
         Text(workout.name, color = white, fontWeight = FontWeight.Bold, fontSize = 26.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
         Text(formatDate(workout.startedAt), color = muted, fontSize = 14.sp)
+        // Cardio-only workouts share as a cardio story: the main activity, its route and its numbers.
+        val focused = workout.cardio.firstOrNull { it.role == CardioRole.main } ?: workout.cardio.firstOrNull()
+        if (workout.exercises.isEmpty() && focused != null) {
+            CardioStory(workout, focused, white, muted)
+            return@Column
+        }
         Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), horizontalArrangement = Arrangement.SpaceBetween) {
             ShareStat("Time", formatDuration(workout.durationSeconds), white, muted)
             ShareStat("Volume", formatVolume(workout.totalVolumeKg, unit), white, muted)
@@ -72,6 +81,23 @@ fun WorkoutShareCard(workout: WorkoutEntity, unit: LoadUnit, layer: GraphicsLaye
         }
         if (workout.exercises.size > 6) Text("+${workout.exercises.size - 6} more", color = muted, fontSize = 13.sp)
     }
+}
+
+@Composable
+private fun CardioStory(workout: WorkoutEntity, cardio: CardioBlock, white: Color, muted: Color) {
+    val metrics = CardioSummary.metrics(cardio)
+    val primary = metrics.firstOrNull { it.kind == CardioSummary.Kind.distance }
+        ?: metrics.firstOrNull { it.kind == CardioSummary.Kind.duration } ?: metrics.firstOrNull()
+    if (cardio.name != workout.name) Text(cardio.name, color = white.copy(alpha = 0.65f), fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+    // Sharing is explicit, so this is the one place a route leaves the app: in the image you choose to send.
+    SavedRoute(workout.id, cardio.id, Modifier.padding(vertical = 4.dp), caption = false)
+    Text((primary?.title ?: "Duration").uppercase(), color = muted, fontSize = 11.sp, letterSpacing = 1.2.sp)
+    Text(primary?.value ?: formatDuration(workout.durationSeconds), color = Color(0xFF7CE3EF), fontWeight = FontWeight.Bold, fontSize = 44.sp, maxLines = 1)
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        metrics.filter { it.kind != primary?.kind }.take(3).forEach { ShareStat(it.title, it.value, white, muted) }
+    }
+    val others = workout.cardio.count { it.completed } - 1
+    if (others > 0) Text("+ $others more ${if (others == 1) "activity" else "activities"}", color = muted, fontSize = 12.sp)
 }
 
 @Composable
